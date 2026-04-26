@@ -24,6 +24,7 @@ class Note:
     parentId: Optional[str]
     text: str
     createdAt: str
+    childCount: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -31,6 +32,7 @@ class Note:
             "parentId": self.parentId,
             "text": self.text,
             "createdAt": self.createdAt,
+            "childCount": self.childCount,
         }
 
 
@@ -57,11 +59,17 @@ _BUSY_TIMEOUT_MS = 5000
 
 
 def _row_to_note(row: aiosqlite.Row) -> Note:
+    # child_count is included by queries that need it; otherwise default to 0.
+    try:
+        child_count = row["child_count"]
+    except (IndexError, KeyError):
+        child_count = 0
     return Note(
         id=row["id"],
         parentId=row["parent_id"],
         text=row["text"],
         createdAt=row["created_at"],
+        childCount=int(child_count or 0),
     )
 
 
@@ -99,15 +107,20 @@ class NoteStore:
 
     async def list_children(self, parent_id: Optional[str]) -> list[Note]:
         conn = await self._ensure_conn()
+        # Subquery yields the direct-child count per row so the UI can render
+        # "Show N replies" affordances without an extra fetch per note.
+        select_clause = (
+            "SELECT n.id, n.parent_id, n.text, n.created_at, "
+            "(SELECT COUNT(*) FROM notes c WHERE c.parent_id = n.id) AS child_count "
+            "FROM notes n"
+        )
         if parent_id is None:
             cursor = await conn.execute(
-                "SELECT id, parent_id, text, created_at FROM notes "
-                "WHERE parent_id IS NULL ORDER BY created_at ASC"
+                f"{select_clause} WHERE n.parent_id IS NULL ORDER BY n.created_at ASC"
             )
         else:
             cursor = await conn.execute(
-                "SELECT id, parent_id, text, created_at FROM notes "
-                "WHERE parent_id = ? ORDER BY created_at ASC",
+                f"{select_clause} WHERE n.parent_id = ? ORDER BY n.created_at ASC",
                 (parent_id,),
             )
         rows = await cursor.fetchall()
@@ -117,7 +130,9 @@ class NoteStore:
     async def get(self, note_id: str) -> Optional[Note]:
         conn = await self._ensure_conn()
         cursor = await conn.execute(
-            "SELECT id, parent_id, text, created_at FROM notes WHERE id = ?",
+            "SELECT n.id, n.parent_id, n.text, n.created_at, "
+            "(SELECT COUNT(*) FROM notes c WHERE c.parent_id = n.id) AS child_count "
+            "FROM notes n WHERE n.id = ?",
             (note_id,),
         )
         row = await cursor.fetchone()

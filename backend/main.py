@@ -52,6 +52,7 @@ class NoteOut(BaseModel):
     parentId: Optional[str]
     text: str
     createdAt: str
+    childCount: int = 0
 
     @classmethod
     def from_note(cls, note: Note) -> "NoteOut":
@@ -60,6 +61,7 @@ class NoteOut(BaseModel):
             parentId=note.parentId,
             text=note.text,
             createdAt=note.createdAt,
+            childCount=note.childCount,
         )
 
 
