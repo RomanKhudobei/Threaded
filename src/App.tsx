@@ -175,6 +175,7 @@ const TAGLINES = [
   "Your ideas are precious.",
   "A quiet mind makes loud thoughts.",
   "Today's note is tomorrow's archive.",
+  "Your ideas worth noting.",
 ];
 
 function RotatingTagline() {

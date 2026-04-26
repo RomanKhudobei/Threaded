@@ -3,6 +3,8 @@
 A quiet little notebook for writing down thoughts and following them through
 infinitely deep threads.
 
+![preview](images/image.png)
+
 The repo holds two pieces:
 
 - **Frontend** — a Vite + React (TypeScript) single-page app that renders the
@@ -104,3 +106,10 @@ npm run build
   parent.
 - Focused thread view shows a clickable, paginated breadcrumb so you can step
   back up the lineage one note at a time.
+
+## To Do
+- Refine shortcuts (ctrl+n for new note, arrows up and down to navigate thoughts, enter to go one level deeper, backspace to go one level upper)
+- Add tags
+- Add date range filter
+- Add ability to edit thoughts
+- Add ability to delete thoughts (send them into 30-day retention trash)
