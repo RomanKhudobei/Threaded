@@ -939,7 +939,6 @@ export default function App(): ReactNode {
               ?.focus();
           }, 0);
         }}
-        onBack={handleBack}
       />
 
       <main className="main">
