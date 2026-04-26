@@ -1,0 +1,19 @@
+node_modules
+dist
+dist-ssr
+*.local
+*.tsbuildinfo
+
+# Editor
+.vscode
+.idea
+.DS_Store
+
+# Python
+__pycache__
+*.pyc
+.venv
+venv
+
+# Backend data
+backend/data/
