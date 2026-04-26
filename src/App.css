@@ -810,12 +810,12 @@ kbd {
 
 /* ——— empty ——— */
 .empty {
-  text-align: left;
   padding: 56px 0;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 12px;
+  align-items: center;
 }
 .empty-mark {
   display: flex;
