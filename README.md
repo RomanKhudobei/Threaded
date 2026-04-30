@@ -32,26 +32,45 @@ The repo holds two pieces:
 
 ## Prerequisites
 
-- Node.js 18+
-- Python 3.10+
+- Docker + Docker Compose
 
-## Running the backend
+## Running locally with Docker Compose
+
+The repo ships with a `docker-compose.yml` that builds both services and wires
+them together, so you can spin up the whole app without installing Node or
+Python locally:
 
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn backend.main:app --reload --port 8000
+docker compose up --build
 ```
 
-> Run `uvicorn` from the repo root (one level above `backend/`) so the
-> `backend.main:app` import path resolves.
+This will:
 
-On first request the backend creates `backend/data/threaded.sqlite3` (plus
-the WAL/SHM sidecar files SQLite uses), initializes the schema, and enables
-WAL mode. Override the location with
+- Build and start the FastAPI backend from `backend/Dockerfile`.
+- Build and start the frontend (served by nginx) from `src/Dockerfile`,
+  exposed on http://localhost:8080.
+- Persist the SQLite database in the named volume `threaded-data`
+  (mounted at `/data` inside the backend container, with
+  `THREADED_DATABASE_PATH=/data/threaded.sqlite3`).
+
+Useful follow-ups:
+
+```bash
+docker compose up -d --build      # run detached
+docker compose logs -f            # tail logs
+docker compose down               # stop containers (keeps the data volume)
+docker compose down -v            # stop and wipe the SQLite volume
+```
+
+Rebuild after changing dependencies or Dockerfiles with
+`docker compose build --no-cache`.
+
+On first request the backend initializes the SQLite schema and enables WAL
+mode. The database lives at `/data/threaded.sqlite3` inside the container
+(persisted in the `threaded-data` volume); override the location with
 `THREADED_DATABASE_PATH=/path/to/threaded.sqlite3`.
+
+## Backend reference
 
 ### Schema
 
@@ -79,23 +98,6 @@ if data ever gets corrupted into a cycle.
   ancestor path (newest ancestors plus `hasMoreAncestors` / `totalAncestors`).
 - `POST /api/notes` — create a root note (no `parentId`) or a child note.
 
-## Running the frontend
-
-```bash
-npm install
-npm run dev
-```
-
-Vite serves the SPA on http://localhost:5173 and proxies `/api/*` to the
-FastAPI dev server on port 8000, so start the backend first.
-
-### Type-checking and production build
-
-```bash
-npm run typecheck
-npm run build
-```
-
 ## How threading works
 
 - Every item is a `Note { id, parentId, text, createdAt }`.
@@ -108,8 +110,17 @@ npm run build
   back up the lineage one note at a time.
 
 ## To Do
-- Refine shortcuts (ctrl+n for new note, arrows up and down to navigate thoughts, enter to go one level deeper, backspace to go one level upper)
-- Add tags
-- Add date range filter
-- Add ability to edit thoughts
-- Add ability to delete thoughts (send them into 30-day retention trash)
+- [ ] Refine shortcuts (ctrl+n for new note, arrows up and down to navigate thoughts, enter to go one level deeper, backspace to go one level upper)
+- [ ] Add tags
+- [ ] Add date range filter
+- [ ] Add ability to edit thoughts
+- [ ] Add ability to delete thoughts (send them into 30-day retention trash)
+- [ ] Make composer expandable
+- [ ] Allow editions for thoughts
+- [ ] Add collapse arrow for opening threads
+- [ ] Make composer sticky at the top
+- [ ] Add sort/filter on main canvas (somewhere near composer). It should stay on each thread. Add
+list of popular tags with counts
+- [ ] Add grouping by date for better visibility and structure
+- [ ] Add auth with Google/Apple
+- [ ] Deploy
