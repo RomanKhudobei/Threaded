@@ -372,7 +372,6 @@ function ThoughtCard({
       </article>
       {replying && (
         <div className="thought-reply">
-          <span className="thought-reply-rail" aria-hidden="true" />
           <Composer
             parentId={note.id}
             placeholder="Continue the thread…"
