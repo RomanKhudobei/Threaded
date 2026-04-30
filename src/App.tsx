@@ -31,6 +31,8 @@ type View =
   | { kind: "root" }
   | { kind: "thread"; noteId: string };
 
+type SidebarMode = "roots" | "siblings";
+
 const API_BASE = "/api";
 const THREAD_ROUTE_PREFIX = "/thread/";
 
@@ -71,6 +73,8 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 
 const api = {
   listRoots: () => http<Note[]>("/notes"),
+  listByParent: (parentId: string) =>
+    http<Note[]>(`/notes?parentId=${encodeURIComponent(parentId)}`),
   getThread: (id: string) => http<ThreadView>(`/notes/${id}/thread`),
   createNote: (text: string, parentId: string | null) =>
     http<Note>("/notes", {
@@ -78,6 +82,10 @@ const api = {
       body: JSON.stringify({ text, parentId }),
     }),
 };
+
+function sortByNewest(notes: Note[]): Note[] {
+  return [...notes].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
 
 // ——— time helpers ———
 function fmtTimestamp(iso: string): string {
@@ -409,8 +417,9 @@ function ThoughtCard({
 
 // ——— sidebar ———
 type SidebarProps = {
-  roots: Note[];
-  currentRootId: string | null;
+  items: Note[];
+  mode: SidebarMode;
+  currentThreadId: string | null;
   query: string;
   onQueryChange: (q: string) => void;
   activeTag: string | null;
@@ -421,8 +430,9 @@ type SidebarProps = {
 };
 
 function Sidebar({
-  roots,
-  currentRootId,
+  items,
+  mode,
+  currentThreadId,
   query,
   onQueryChange,
   activeTag,
@@ -452,7 +462,7 @@ function Sidebar({
       list.removeEventListener("scroll", update);
       ro.disconnect();
     };
-  }, [roots.length]);
+  }, [items.length]);
 
   return (
     <aside className="sidebar" ref={wrapRef}>
@@ -508,15 +518,18 @@ function Sidebar({
 
       <div className="sidebar-section sidebar-section--grow">
         <div className="sidebar-label">
-          All threads <span className="muted">{roots.length}</span>
+          {mode === "siblings" ? "Siblings" : "All threads"}{" "}
+          <span className="muted">{items.length}</span>
         </div>
         <div className="sidebar-list-wrap">
           <div className="sidebar-list" ref={listRef}>
-            {roots.length === 0 ? (
-              <div className="muted small sidebar-empty">No thoughts yet.</div>
+            {items.length === 0 ? (
+              <div className="muted small sidebar-empty">
+                {mode === "siblings" ? "No sibling threads." : "No thoughts yet."}
+              </div>
             ) : (
-              roots.map((r) => {
-                const isActive = currentRootId === r.id;
+              items.map((r) => {
+                const isActive = currentThreadId === r.id;
                 return (
                   <button
                     key={r.id}
@@ -824,6 +837,8 @@ export default function App(): ReactNode {
     return viewFromPath(window.location.pathname);
   });
   const [roots, setRoots] = useState<Note[]>([]);
+  const [sidebarThreads, setSidebarThreads] = useState<Note[]>([]);
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>("roots");
   const [thread, setThread] = useState<ThreadView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -872,8 +887,7 @@ export default function App(): ReactNode {
     setError(null);
     try {
       const data = await api.listRoots();
-      // newest first in sidebar/feed
-      setRoots([...data].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+      setRoots(sortByNewest(data));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load notes");
     } finally {
@@ -902,6 +916,47 @@ export default function App(): ReactNode {
       void refreshThread(view.noteId);
     }
   }, [view, refreshRoots, refreshThread]);
+
+  useEffect(() => {
+    const setRootsSidebar = () => {
+      setSidebarMode("roots");
+      setSidebarThreads(roots);
+    };
+
+    if (view.kind === "root") {
+      setRootsSidebar();
+      return;
+    }
+    if (!thread || thread.note.id !== view.noteId) {
+      return;
+    }
+    if (thread.note.parentId === null) {
+      setRootsSidebar();
+      return;
+    }
+    const parentId = thread.note.parentId;
+
+    let cancelled = false;
+    const selectedNoteId = view.noteId;
+    setSidebarMode("siblings");
+
+    void (async () => {
+      try {
+        const siblings = await api.listByParent(parentId);
+        if (cancelled) return;
+        if (view.kind !== "thread" || view.noteId !== selectedNoteId) return;
+        setSidebarThreads(sortByNewest(siblings));
+      } catch {
+        if (cancelled) return;
+        if (view.kind !== "thread" || view.noteId !== selectedNoteId) return;
+        setSidebarThreads([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [view, thread, roots]);
 
   const handleCreated = useCallback(
     (note: Note) => {
@@ -975,13 +1030,14 @@ export default function App(): ReactNode {
     });
   }, [roots, query, activeTag]);
 
-  const currentRootId = view.kind === "thread" ? view.noteId : null;
+  const currentThreadId = view.kind === "thread" ? view.noteId : null;
 
   return (
     <div className="app">
       <Sidebar
-        roots={roots}
-        currentRootId={currentRootId}
+        items={sidebarThreads}
+        mode={sidebarMode}
+        currentThreadId={currentThreadId}
         query={query}
         onQueryChange={(q) => {
           setActiveReplyComposerId(null);
