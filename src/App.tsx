@@ -161,11 +161,6 @@ const Icons = {
       <path d="m6 4 4 4-4 4" />
     </svg>
   ),
-  Expand: () => (
-    <svg {...iconProps} width={12} height={12} aria-hidden="true">
-      <path d="M9 3h4v4M7 13H3V9M13 3l-5 5M3 13l5-5" />
-    </svg>
-  ),
   X: () => (
     <svg {...iconProps} width={12} height={12} aria-hidden="true">
       <path d="m4 4 8 8M12 4l-8 8" />

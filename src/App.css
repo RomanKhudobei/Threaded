@@ -774,32 +774,6 @@ kbd {
   padding-left: 18px;
 }
 
-.node-expand {
-  margin-top: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 11px;
-  font-family: var(--font-mono);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 100px;
-  transition: all 140ms;
-}
-.node-expand:hover {
-  color: var(--text);
-  border-color: var(--text-3);
-  background: var(--surface-2);
-}
-.node-expand-line {
-  display: inline-block;
-  width: 14px;
-  height: 1px;
-  background: var(--rail);
-}
-
 /* ——— empty ——— */
 .empty {
   padding: 56px 0;
