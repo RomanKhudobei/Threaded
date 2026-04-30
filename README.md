@@ -65,6 +65,30 @@ docker compose down -v            # stop and wipe the SQLite volume
 Rebuild after changing dependencies or Dockerfiles with
 `docker compose build --no-cache`.
 
+## Frontend live reload in Docker (no image rebuild on edits)
+
+For day-to-day frontend work, use the dev compose override. It runs Vite inside
+a Node container with a bind mount, so file changes are picked up immediately.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up backend frontend-dev
+```
+
+Then open http://localhost:5173.
+
+Notes:
+
+- `frontend-dev` uses `npm run dev` instead of the nginx production image.
+- Source code is bind-mounted (`./:/app`) so edits hot-reload without rebuilding.
+- API requests still go through `/api`; in this mode Vite proxies to
+  `http://backend:8000` via `VITE_API_TARGET`.
+
+Stop the stack with:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+```
+
 On first request the backend initializes the SQLite schema and enables WAL
 mode. The database lives at `/data/threaded.sqlite3` inside the container
 (persisted in the `threaded-data` volume); override the location with

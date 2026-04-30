@@ -32,6 +32,24 @@ type View =
   | { kind: "thread"; noteId: string };
 
 const API_BASE = "/api";
+const THREAD_ROUTE_PREFIX = "/thread/";
+
+function viewFromPath(pathname: string): View {
+  if (pathname.startsWith(THREAD_ROUTE_PREFIX)) {
+    const encodedId = pathname.slice(THREAD_ROUTE_PREFIX.length);
+    if (encodedId) {
+      return { kind: "thread", noteId: decodeURIComponent(encodedId) };
+    }
+  }
+  return { kind: "root" };
+}
+
+function pathFromView(view: View): string {
+  if (view.kind === "thread") {
+    return `${THREAD_ROUTE_PREFIX}${encodeURIComponent(view.noteId)}`;
+  }
+  return "/";
+}
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -806,7 +824,10 @@ function Breadcrumb({
 
 // ——— main ———
 export default function App(): ReactNode {
-  const [view, setView] = useState<View>({ kind: "root" });
+  const [view, setView] = useState<View>(() => {
+    if (typeof window === "undefined") return { kind: "root" };
+    return viewFromPath(window.location.pathname);
+  });
   const [roots, setRoots] = useState<Note[]>([]);
   const [thread, setThread] = useState<ThreadView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -816,6 +837,7 @@ export default function App(): ReactNode {
   const [activeReplyComposerId, setActiveReplyComposerId] = useState<string | null>(
     null,
   );
+  const didSyncRouteRef = useRef(false);
   const [dark, setDark] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     const stored = window.localStorage.getItem("threaded-theme");
@@ -828,6 +850,27 @@ export default function App(): ReactNode {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     window.localStorage.setItem("threaded-theme", dark ? "dark" : "light");
   }, [dark]);
+
+  useEffect(() => {
+    const targetPath = pathFromView(view);
+    if (window.location.pathname !== targetPath) {
+      if (didSyncRouteRef.current) {
+        window.history.pushState({}, "", targetPath);
+      } else {
+        window.history.replaceState({}, "", targetPath);
+      }
+    }
+    didSyncRouteRef.current = true;
+  }, [view]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setActiveReplyComposerId(null);
+      setView(viewFromPath(window.location.pathname));
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const refreshRoots = useCallback(async () => {
     setLoading(true);
