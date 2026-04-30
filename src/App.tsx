@@ -314,6 +314,8 @@ type ThoughtCardProps = {
   note: Note;
   onOpenThread: (noteId: string) => void;
   onCreated: (note: Note) => void;
+  activeReplyComposerId: string | null;
+  onReplyComposerChange: (noteId: string | null) => void;
   isFocused?: boolean;
 };
 
@@ -321,9 +323,11 @@ function ThoughtCard({
   note,
   onOpenThread,
   onCreated,
+  activeReplyComposerId,
+  onReplyComposerChange,
   isFocused,
 }: ThoughtCardProps) {
-  const [replying, setReplying] = useState(false);
+  const replying = activeReplyComposerId === note.id;
   const tags = useMemo(() => extractTags(note.text), [note.text]);
   const displayText = useMemo(
     () => note.text.replace(/#(\w+)/g, "").replace(/\s+\n/g, "\n").trim() || note.text,
@@ -362,7 +366,7 @@ function ThoughtCard({
           <button
             type="button"
             className={`meta-btn ${replying ? "is-active" : ""}`}
-            onClick={() => setReplying((v) => !v)}
+            onClick={() => onReplyComposerChange(replying ? null : note.id)}
             aria-label={replying ? "Close reply" : "Reply in thread"}
             title={replying ? "Close reply" : "Reply in thread"}
           >
@@ -378,9 +382,9 @@ function ThoughtCard({
             ctaLabel="Reply"
             variant="inline"
             autoFocus
-            onCancel={() => setReplying(false)}
+            onCancel={() => onReplyComposerChange(null)}
             onCreated={(child) => {
-              setReplying(false);
+              onReplyComposerChange(null);
               onCreated(child);
             }}
           />
@@ -592,6 +596,8 @@ type RootViewProps = {
   activeTag: string | null;
   onCreated: (note: Note) => void;
   onOpenThread: (id: string) => void;
+  activeReplyComposerId: string | null;
+  onReplyComposerChange: (noteId: string | null) => void;
 };
 
 function RootView({
@@ -602,6 +608,8 @@ function RootView({
   activeTag,
   onCreated,
   onOpenThread,
+  activeReplyComposerId,
+  onReplyComposerChange,
 }: RootViewProps) {
   return (
     <>
@@ -633,6 +641,8 @@ function RootView({
                 note={root}
                 onOpenThread={onOpenThread}
                 onCreated={onCreated}
+                activeReplyComposerId={activeReplyComposerId}
+                onReplyComposerChange={onReplyComposerChange}
               />
             </article>
           ))}
@@ -649,6 +659,8 @@ type ThreadPageProps = {
   error: string | null;
   onCreated: (note: Note) => void;
   onOpenThread: (id: string) => void;
+  activeReplyComposerId: string | null;
+  onReplyComposerChange: (noteId: string | null) => void;
 };
 
 function ThreadPage({
@@ -657,6 +669,8 @@ function ThreadPage({
   error,
   onCreated,
   onOpenThread,
+  activeReplyComposerId,
+  onReplyComposerChange,
 }: ThreadPageProps) {
   if (loading && !thread) {
     return <div className="loading">Loading thread…</div>;
@@ -683,6 +697,8 @@ function ThreadPage({
             note={note}
             onOpenThread={onOpenThread}
             onCreated={onCreated}
+            activeReplyComposerId={activeReplyComposerId}
+            onReplyComposerChange={onReplyComposerChange}
             isFocused
           />
           {children.length > 0 && (
@@ -694,6 +710,8 @@ function ThreadPage({
                       note={child}
                       onOpenThread={onOpenThread}
                       onCreated={onCreated}
+                      activeReplyComposerId={activeReplyComposerId}
+                      onReplyComposerChange={onReplyComposerChange}
                     />
                   </div>
                 </div>
@@ -795,6 +813,9 @@ export default function App(): ReactNode {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [activeReplyComposerId, setActiveReplyComposerId] = useState<string | null>(
+    null,
+  );
   const [dark, setDark] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     const stored = window.localStorage.getItem("threaded-theme");
@@ -870,11 +891,15 @@ export default function App(): ReactNode {
   );
 
   const handleOpenThread = useCallback((id: string) => {
+    setActiveReplyComposerId(null);
     setView({ kind: "thread", noteId: id });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  const handleBack = useCallback(() => setView({ kind: "root" }), []);
+  const handleBack = useCallback(() => {
+    setActiveReplyComposerId(null);
+    setView({ kind: "root" });
+  }, []);
 
   // ⌘K focuses search.
   useEffect(() => {
@@ -921,17 +946,20 @@ export default function App(): ReactNode {
         currentRootId={currentRootId}
         query={query}
         onQueryChange={(q) => {
+          setActiveReplyComposerId(null);
           setQuery(q);
           setView({ kind: "root" });
         }}
         activeTag={activeTag}
         onTagClick={(t) => {
+          setActiveReplyComposerId(null);
           setActiveTag((prev) => (prev === t ? null : t));
           setView({ kind: "root" });
         }}
         tags={tags}
         onSelect={handleOpenThread}
         onNew={() => {
+          setActiveReplyComposerId(null);
           setView({ kind: "root" });
           window.setTimeout(() => {
             document
@@ -978,6 +1006,8 @@ export default function App(): ReactNode {
               activeTag={activeTag}
               onCreated={handleCreated}
               onOpenThread={handleOpenThread}
+              activeReplyComposerId={activeReplyComposerId}
+              onReplyComposerChange={setActiveReplyComposerId}
             />
           ) : (
             <ThreadPage
@@ -986,6 +1016,8 @@ export default function App(): ReactNode {
               error={error}
               onCreated={handleCreated}
               onOpenThread={handleOpenThread}
+              activeReplyComposerId={activeReplyComposerId}
+              onReplyComposerChange={setActiveReplyComposerId}
             />
           )}
         </div>
