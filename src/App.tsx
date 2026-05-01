@@ -232,10 +232,15 @@ function Wordmark({ size = "lg" }: { size?: "sm" | "lg" }) {
 // ——— rotating tagline (sidebar foot) ———
 const TAGLINES = [
   "The best way to save your thoughts — write them down.",
-  "Your ideas are precious.",
+  "The perfect place to break down your ideas.",
+  "Your ideas are precious. Don't let them fade away.",
   "A quiet mind makes loud thoughts.",
   "Today's note is tomorrow's archive.",
   "Your ideas worth noting.",
+  "The perfect place to detailize your ideas.",
+  "Taking a note is the first step to clarity.",
+  "A note is a reminder of what you've learned.",
+  "Taking note is the first step in implementing your idea."
 ];
 
 function RotatingTagline() {

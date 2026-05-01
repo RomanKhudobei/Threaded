@@ -149,3 +149,4 @@ list of popular tags with counts
 - [ ] Add colors?
 - [x] Implement tree-like navigation for thoughts (or in sidebar display adjacent cards, instead of roots)
 - [ ] Add thought spaces
+- [ ] Add reactions and filter by reaction
