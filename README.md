@@ -139,9 +139,7 @@ if data ever gets corrupted into a cycle.
 - [ ] Add date range filter
 - [ ] Add ability to edit thoughts
 - [ ] Add ability to delete thoughts (send them into 30-day retention trash)
-- [ ] Make composer expandable
-- [ ] Allow editions for thoughts
-- [ ] Add collapse arrow for opening threads
+- [x] Add collapse arrow for opening threads
 - [ ] Make composer sticky at the top
 - [ ] Add sort/filter on main canvas (somewhere near composer). It should stay on each thread. Add
 list of popular tags with counts
@@ -149,5 +147,5 @@ list of popular tags with counts
 - [ ] Add auth with Google/Apple
 - [ ] Deploy
 - [ ] Add colors?
-- [ ] Implement tree-like navigation for thoughts (or in sidebar display adjacent cards, instead of roots)
+- [x] Implement tree-like navigation for thoughts (or in sidebar display adjacent cards, instead of roots)
 - [ ] Add thought spaces

@@ -102,6 +102,34 @@ function fmtTimestamp(iso: string): string {
   return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} · ${time}`;
 }
 
+function toDayKey(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function fmtGroupLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  if (sameDay) return "Today";
+  if (isYesterday) return "Yest";
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 function relTimestamp(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -347,6 +375,7 @@ type ThoughtCardProps = {
   children?: Note[];
   canExpand?: boolean;
   isChildCard?: boolean;
+  timestampStyle?: "full" | "time-only" | "hidden";
   showRepliesChip?: boolean;
   onOpenThread: (noteId: string) => void;
   onCreated: (note: Note) => void;
@@ -360,6 +389,7 @@ function ThoughtCard({
   children = [],
   canExpand = false,
   isChildCard = false,
+  timestampStyle = "full",
   showRepliesChip = true,
   onOpenThread,
   onCreated,
@@ -411,9 +441,11 @@ function ThoughtCard({
       <article className="thought-card">
         <p className="thought-body">{displayText}</p>
         <div className="thought-meta">
-          <time className="ts" dateTime={note.createdAt}>
-            {fmtTimestamp(note.createdAt)}
-          </time>
+          {timestampStyle !== "hidden" && (
+            <time className="ts" dateTime={note.createdAt}>
+              {timestampStyle === "time-only" ? fmtTime(note.createdAt) : fmtTimestamp(note.createdAt)}
+            </time>
+          )}
           {tags.length > 0 && (
             <span className="tags">
               {tags.map((t) => (
@@ -467,6 +499,7 @@ function ThoughtCard({
                 note={child}
                 canExpand={false}
                 isChildCard
+                timestampStyle={timestampStyle}
                 onOpenThread={onOpenThread}
                 onCreated={onCreated}
                 activeReplyComposerId={activeReplyComposerId}
@@ -723,6 +756,25 @@ function RootView({
   const [childrenByParentId, setChildrenByParentId] = useState<
     Record<string, Note[]>
   >({});
+  const groupedRoots = useMemo(() => {
+    const out: { key: string; label: string; notes: Note[] }[] = [];
+    const groupIndexByKey = new Map<string, number>();
+    for (const root of roots) {
+      const key = toDayKey(root.createdAt) || root.createdAt;
+      const existingIdx = groupIndexByKey.get(key);
+      if (existingIdx === undefined) {
+        groupIndexByKey.set(key, out.length);
+        out.push({
+          key,
+          label: fmtGroupLabel(root.createdAt) || "Unknown",
+          notes: [root],
+        });
+        continue;
+      }
+      out[existingIdx].notes.push(root);
+    }
+    return out;
+  }, [roots]);
 
   useEffect(() => {
     const parents = roots.filter((root) => root.childCount > 0);
@@ -778,18 +830,28 @@ function RootView({
         <EmptyState query={query} activeTag={activeTag} />
       ) : (
         <section className="feed">
-          {roots.map((root) => (
-            <article key={root.id} className="feed-item">
-              <ThoughtCard
-                note={root}
-                children={childrenByParentId[root.id] ?? []}
-                canExpand
-                onOpenThread={onOpenThread}
-                onCreated={onCreated}
-                activeReplyComposerId={activeReplyComposerId}
-                onReplyComposerChange={onReplyComposerChange}
-              />
-            </article>
+          {groupedRoots.map((group) => (
+            <section key={group.key} className="feed-date-group" aria-label={`${group.label} thoughts`}>
+              <time className="feed-date-rail" dateTime={group.key}>
+                {group.label}
+              </time>
+              <div className="feed-date-items">
+                {group.notes.map((root) => (
+                  <article key={root.id} className="feed-item">
+                    <ThoughtCard
+                      note={root}
+                      children={childrenByParentId[root.id] ?? []}
+                      canExpand
+                      timestampStyle="time-only"
+                      onOpenThread={onOpenThread}
+                      onCreated={onCreated}
+                      activeReplyComposerId={activeReplyComposerId}
+                      onReplyComposerChange={onReplyComposerChange}
+                    />
+                  </article>
+                ))}
+              </div>
+            </section>
           ))}
         </section>
       )}
