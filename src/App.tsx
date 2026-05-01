@@ -347,6 +347,7 @@ type ThoughtCardProps = {
   children?: Note[];
   canExpand?: boolean;
   isChildCard?: boolean;
+  showRepliesChip?: boolean;
   onOpenThread: (noteId: string) => void;
   onCreated: (note: Note) => void;
   activeReplyComposerId: string | null;
@@ -359,6 +360,7 @@ function ThoughtCard({
   children = [],
   canExpand = false,
   isChildCard = false,
+  showRepliesChip = true,
   onOpenThread,
   onCreated,
   activeReplyComposerId,
@@ -434,7 +436,7 @@ function ThoughtCard({
               {isExpanded ? "Hide" : "Show"} <Icons.ChevronDown />
             </button>
           )}
-          {replies > 0 && (
+          {showRepliesChip && replies > 0 && (
             <button
               type="button"
               className="meta-btn"
@@ -893,6 +895,7 @@ function ThreadPage({
         <div className="node-content">
           <ThoughtCard
             note={note}
+            showRepliesChip={false}
             onOpenThread={onOpenThread}
             onCreated={onCreated}
             activeReplyComposerId={activeReplyComposerId}
