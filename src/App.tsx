@@ -174,6 +174,11 @@ const Icons = {
       <path d="m4 4 8 8M12 4l-8 8" />
     </svg>
   ),
+  ChevronDown: () => (
+    <svg {...iconProps} width={12} height={12} aria-hidden="true">
+      <path d="m4 6 4 4 4-4" />
+    </svg>
+  ),
   ArrowLeft: () => (
     <svg {...iconProps} aria-hidden="true">
       <path d="m8 4-4 4 4 4" />
@@ -339,6 +344,9 @@ function Composer({
 // ——— thought card ———
 type ThoughtCardProps = {
   note: Note;
+  children?: Note[];
+  canExpand?: boolean;
+  isChildCard?: boolean;
   onOpenThread: (noteId: string) => void;
   onCreated: (note: Note) => void;
   activeReplyComposerId: string | null;
@@ -348,12 +356,18 @@ type ThoughtCardProps = {
 
 function ThoughtCard({
   note,
+  children = [],
+  canExpand = false,
+  isChildCard = false,
   onOpenThread,
   onCreated,
   activeReplyComposerId,
   onReplyComposerChange,
   isFocused,
 }: ThoughtCardProps) {
+  const childrenWrapRef = useRef<HTMLDivElement | null>(null);
+  const childrenListRef = useRef<HTMLDivElement | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
   const replying = activeReplyComposerId === note.id;
   const tags = useMemo(() => extractTags(note.text), [note.text]);
   const displayText = useMemo(
@@ -361,8 +375,37 @@ function ThoughtCard({
     [note.text],
   );
   const replies = note.childCount;
+  const canShowChildren = canExpand && children.length > 0;
+
+  useLayoutEffect(() => {
+    const wrap = childrenWrapRef.current;
+    const list = childrenListRef.current;
+    if (!wrap || !list || !canShowChildren || !isExpanded) return;
+    const update = () => {
+      const top = list.scrollTop > 2;
+      const bot = list.scrollTop + list.clientHeight < list.scrollHeight - 2;
+      wrap.dataset.shadowTop = top ? "1" : "0";
+      wrap.dataset.shadowBot = bot ? "1" : "0";
+    };
+    update();
+    list.addEventListener("scroll", update);
+    const ro = new ResizeObserver(update);
+    ro.observe(list);
+    return () => {
+      list.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [canShowChildren, isExpanded, children.length]);
+
+  useEffect(() => {
+    if (canShowChildren) return;
+    setIsExpanded(false);
+  }, [canShowChildren]);
+
   return (
-    <div className={`thought ${isFocused ? "is-focused" : ""}`}>
+    <div
+      className={`thought ${isFocused ? "is-focused" : ""} ${isChildCard ? "is-child" : ""}`.trim()}
+    >
       <article className="thought-card">
         <p className="thought-body">{displayText}</p>
         <div className="thought-meta">
@@ -379,12 +422,24 @@ function ThoughtCard({
             </span>
           )}
           <span className="thought-spacer" />
+          {canShowChildren && (
+            <button
+              type="button"
+              className={`meta-btn meta-btn--icon thought-expand-btn ${isExpanded ? "is-expanded" : ""}`}
+              onClick={() => setIsExpanded((prev) => !prev)}
+              aria-label={isExpanded ? "Hide children" : "Show children"}
+              aria-expanded={isExpanded}
+              title={isExpanded ? "Hide children" : "Show children"}
+            >
+              {isExpanded ? "Hide" : "Show"} <Icons.ChevronDown />
+            </button>
+          )}
           {replies > 0 && (
             <button
               type="button"
               className="meta-btn"
               onClick={() => onOpenThread(note.id)}
-              title="Open thread"
+              title="Open replies"
             >
               {replies} {replies === 1 ? "reply" : "replies"}
               <Icons.Chevron />
@@ -394,13 +449,33 @@ function ThoughtCard({
             type="button"
             className={`meta-btn ${replying ? "is-active" : ""}`}
             onClick={() => onReplyComposerChange(replying ? null : note.id)}
-            aria-label={replying ? "Close reply" : "Reply in thread"}
-            title={replying ? "Close reply" : "Reply in thread"}
+            aria-label={replying ? "Close reply composer" : "Write a reply"}
+            title={replying ? "Close reply composer" : "Write a reply"}
           >
             <Icons.Reply />
           </button>
         </div>
       </article>
+      {canShowChildren && isExpanded && (
+        <div className="thought-children-wrap" ref={childrenWrapRef}>
+          <div className="thought-children-scroll" ref={childrenListRef}>
+            {children.map((child) => (
+              <ThoughtCard
+                key={child.id}
+                note={child}
+                canExpand={false}
+                isChildCard
+                onOpenThread={onOpenThread}
+                onCreated={onCreated}
+                activeReplyComposerId={activeReplyComposerId}
+                onReplyComposerChange={onReplyComposerChange}
+              />
+            ))}
+          </div>
+          <div className="scroll-shadow scroll-shadow--top" aria-hidden="true" />
+          <div className="scroll-shadow scroll-shadow--bottom" aria-hidden="true" />
+        </div>
+      )}
       {replying && (
         <div className="thought-reply">
           <Composer
@@ -643,6 +718,40 @@ function RootView({
   activeReplyComposerId,
   onReplyComposerChange,
 }: RootViewProps) {
+  const [childrenByParentId, setChildrenByParentId] = useState<
+    Record<string, Note[]>
+  >({});
+
+  useEffect(() => {
+    const parents = roots.filter((root) => root.childCount > 0);
+    if (parents.length === 0) {
+      setChildrenByParentId({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const pairs = await Promise.all(
+        parents.map(async (root) => {
+          try {
+            const children = await api.listByParent(root.id);
+            return [root.id, sortByNewest(children)] as const;
+          } catch {
+            return [root.id, [] as Note[]] as const;
+          }
+        }),
+      );
+      if (cancelled) return;
+      const next: Record<string, Note[]> = {};
+      for (const [parentId, children] of pairs) {
+        next[parentId] = children;
+      }
+      setChildrenByParentId(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roots]);
+
   return (
     <>
       <section className="hero">
@@ -671,6 +780,8 @@ function RootView({
             <article key={root.id} className="feed-item">
               <ThoughtCard
                 note={root}
+                children={childrenByParentId[root.id] ?? []}
+                canExpand
                 onOpenThread={onOpenThread}
                 onCreated={onCreated}
                 activeReplyComposerId={activeReplyComposerId}
@@ -706,6 +817,48 @@ function ThreadPage({
   activeReplyComposerId,
   onReplyComposerChange,
 }: ThreadPageProps) {
+  const [childrenByParentId, setChildrenByParentId] = useState<
+    Record<string, Note[]>
+  >({});
+
+  useEffect(() => {
+    if (!thread) {
+      setChildrenByParentId({});
+      return;
+    }
+
+    const parents = thread.children.filter((candidate) => candidate.childCount > 0);
+    if (parents.length === 0) {
+      setChildrenByParentId({});
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const pairs = await Promise.all(
+        parents.map(async (parent) => {
+          try {
+            const children = await api.listByParent(parent.id);
+            return [parent.id, sortByNewest(children)] as const;
+          } catch {
+            return [parent.id, [] as Note[]] as const;
+          }
+        }),
+      );
+
+      if (cancelled) return;
+      const next: Record<string, Note[]> = {};
+      for (const [parentId, children] of pairs) {
+        next[parentId] = children;
+      }
+      setChildrenByParentId(next);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [thread]);
+
   if (loading && !thread) {
     return <div className="loading">Loading thread…</div>;
   }
@@ -753,6 +906,8 @@ function ThreadPage({
                   <div className="node-content">
                     <ThoughtCard
                       note={child}
+                      children={childrenByParentId[child.id] ?? []}
+                      canExpand
                       onOpenThread={onOpenThread}
                       onCreated={onCreated}
                       activeReplyComposerId={activeReplyComposerId}

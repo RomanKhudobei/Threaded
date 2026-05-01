@@ -148,3 +148,6 @@ list of popular tags with counts
 - [ ] Add grouping by date for better visibility and structure
 - [ ] Add auth with Google/Apple
 - [ ] Deploy
+- [ ] Add colors?
+- [ ] Implement tree-like navigation for thoughts (or in sidebar display adjacent cards, instead of roots)
+- [ ] Add thought spaces
