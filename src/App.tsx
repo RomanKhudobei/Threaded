@@ -174,6 +174,12 @@ const Icons = {
       <path d="m4 4 8 8M12 4l-8 8" />
     </svg>
   ),
+  ArrowLeft: () => (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="m8 4-4 4 4 4" />
+      <path d="M4 8h8" />
+    </svg>
+  ),
 };
 
 // ——— wordmark / brand ———
@@ -683,6 +689,7 @@ type ThreadPageProps = {
   thread: ThreadView | null;
   loading: boolean;
   error: string | null;
+  onGoUpLevel: () => void;
   onCreated: (note: Note) => void;
   onOpenThread: (id: string) => void;
   activeReplyComposerId: string | null;
@@ -693,6 +700,7 @@ function ThreadPage({
   thread,
   loading,
   error,
+  onGoUpLevel,
   onCreated,
   onOpenThread,
   activeReplyComposerId,
@@ -709,7 +717,18 @@ function ThreadPage({
   return (
     <section className="thread-view thread-style-indent">
       <div className="thread-view-header">
-        <div className="muted small">Following the thread.</div>
+        <div className="thread-view-heading">
+          <button
+            type="button"
+            className="thread-level-up"
+            onClick={onGoUpLevel}
+            aria-label="Go to previous thread level"
+            title="Previous level"
+          >
+            <Icons.ArrowLeft />
+          </button>
+          <div className="muted small">Following the thread.</div>
+        </div>
         <div className="thread-stats">
           {children.length} {children.length === 1 ? "reply" : "replies"}
         </div>
@@ -994,6 +1013,15 @@ export default function App(): ReactNode {
     setView({ kind: "root" });
   }, []);
 
+  const handleGoUpLevel = useCallback(() => {
+    const parentId = thread?.note.parentId;
+    if (parentId) {
+      handleOpenThread(parentId);
+      return;
+    }
+    handleBack();
+  }, [thread, handleOpenThread, handleBack]);
+
   // ⌘K focuses search.
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -1108,6 +1136,7 @@ export default function App(): ReactNode {
               thread={thread}
               loading={loading}
               error={error}
+              onGoUpLevel={handleGoUpLevel}
               onCreated={handleCreated}
               onOpenThread={handleOpenThread}
               activeReplyComposerId={activeReplyComposerId}

@@ -27,7 +27,7 @@
   --radius: 10px;
   --radius-lg: 14px;
 
-  --pad-card: 18px 20px;
+  --pad-card: 10px 12px;
   --gap-feed: 14px;
 
   --content-width: 720px;
@@ -662,8 +662,8 @@ kbd {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 12px;
-  padding-top: 10px;
+  margin-top: 10px;
+  padding-top: 5px;
   border-top: 1px dashed var(--border);
 }
 .ts {
@@ -737,6 +737,27 @@ kbd {
   align-items: baseline;
   justify-content: space-between;
   padding: 0 4px 4px;
+}
+.thread-view-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.thread-level-up {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 120ms;
+}
+.thread-level-up:hover {
+  color: var(--text);
+  border-color: var(--text-3);
 }
 .thread-stats {
   font-size: 11px;
