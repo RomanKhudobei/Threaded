@@ -86,6 +86,22 @@ const api = {
       method: "PATCH",
       body: JSON.stringify({ text }),
     }),
+  deleteNote: async (id: string) => {
+    const res = await fetch(`${API_BASE}/notes/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        if (body && typeof body.detail === "string") detail = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail || `Request failed (${res.status})`);
+    }
+  },
 };
 
 function sortByNewest(notes: Note[]): Note[] {
@@ -395,6 +411,7 @@ type ThoughtCardProps = {
   onOpenThread: (noteId: string) => void;
   onCreated: (note: Note) => void;
   onUpdated: (noteId: string, text: string) => Promise<void>;
+  onDeleted: (note: Note) => Promise<void>;
   activeReplyComposerId: string | null;
   onReplyComposerChange: (noteId: string | null) => void;
   isFocused?: boolean;
@@ -408,6 +425,7 @@ function ThoughtCard({
   onOpenThread,
   onCreated,
   onUpdated,
+  onDeleted,
   activeReplyComposerId,
   onReplyComposerChange,
   isFocused,
@@ -417,6 +435,8 @@ function ThoughtCard({
   const [draftText, setDraftText] = useState(note.text);
   const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const replying = activeReplyComposerId === note.id;
   const tags = useMemo(() => extractTags(note.text), [note.text]);
@@ -454,6 +474,17 @@ function ThoughtCard({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [isActionsMenuOpen]);
+
+  useEffect(() => {
+    if (!showDeleteDialog) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && !deleting) {
+        setShowDeleteDialog(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showDeleteDialog, deleting]);
 
   const cancelEdit = useCallback(() => {
     if (savingEdit) return;
@@ -499,6 +530,39 @@ function ThoughtCard({
       cancelEdit();
     }
   };
+
+  const handleDelete = useCallback(async () => {
+    if (savingEdit || deleting) return;
+    setDeleting(true);
+    setIsActionsMenuOpen(false);
+    try {
+      await onDeleted(note);
+      if (activeReplyComposerId === note.id) {
+        onReplyComposerChange(null);
+      }
+    } catch {
+      // App-level handler already sets the error banner.
+    } finally {
+      setDeleting(false);
+      setShowDeleteDialog(false);
+    }
+  }, [
+    savingEdit,
+    deleting,
+    note,
+    onDeleted,
+    activeReplyComposerId,
+    onReplyComposerChange,
+  ]);
+
+  const onDeleteAction = useCallback(() => {
+    if (note.childCount > 0) {
+      setIsActionsMenuOpen(false);
+      setShowDeleteDialog(true);
+      return;
+    }
+    void handleDelete();
+  }, [note.childCount, handleDelete]);
 
   return (
     <div
@@ -609,9 +673,18 @@ function ThoughtCard({
                   className="thought-context-item"
                   onClick={openEditor}
                   role="menuitem"
-                  disabled={savingEdit}
+                  disabled={savingEdit || deleting}
                 >
                   Edit
+                </button>
+                <button
+                  type="button"
+                  className="thought-context-item thought-context-item--danger"
+                  onClick={onDeleteAction}
+                  role="menuitem"
+                  disabled={savingEdit || deleting}
+                >
+                  {deleting ? "Deleting…" : "Delete"}
                 </button>
               </div>
             </div>
@@ -627,7 +700,7 @@ function ThoughtCard({
             }}
             aria-label={replying ? "Close reply composer" : "Write a reply"}
             title={replying ? "Close reply composer" : "Write a reply"}
-            disabled={savingEdit}
+            disabled={savingEdit || deleting}
           >
             <Icons.Reply />
           </button>
@@ -647,6 +720,49 @@ function ThoughtCard({
               onCreated(child);
             }}
           />
+        </div>
+      )}
+      {showDeleteDialog && (
+        <div
+          className="dialog-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!deleting) setShowDeleteDialog(false);
+          }}
+        >
+          <section
+            className="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`delete-dialog-title-${note.id}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id={`delete-dialog-title-${note.id}`} className="dialog-title">
+              Delete thought?
+            </h3>
+            <p className="dialog-body">
+              This will delete this thought and its {note.childCount}{" "}
+              {note.childCount === 1 ? "reply" : "replies"}.
+            </p>
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setShowDeleteDialog(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => void handleDelete()}
+                disabled={deleting}
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </div>
@@ -860,6 +976,7 @@ type RootViewProps = {
   activeTag: string | null;
   onCreated: (note: Note) => void;
   onUpdated: (noteId: string, text: string) => Promise<void>;
+  onDeleted: (note: Note) => Promise<void>;
   onOpenThread: (id: string) => void;
   activeReplyComposerId: string | null;
   onReplyComposerChange: (noteId: string | null) => void;
@@ -873,6 +990,7 @@ function RootView({
   activeTag,
   onCreated,
   onUpdated,
+  onDeleted,
   onOpenThread,
   activeReplyComposerId,
   onReplyComposerChange,
@@ -935,6 +1053,7 @@ function RootView({
                       onOpenThread={onOpenThread}
                       onCreated={onCreated}
                       onUpdated={onUpdated}
+                      onDeleted={onDeleted}
                       activeReplyComposerId={activeReplyComposerId}
                       onReplyComposerChange={onReplyComposerChange}
                     />
@@ -957,6 +1076,7 @@ type ThreadPageProps = {
   onGoUpLevel: () => void;
   onCreated: (note: Note) => void;
   onUpdated: (noteId: string, text: string) => Promise<void>;
+  onDeleted: (note: Note) => Promise<void>;
   onOpenThread: (id: string) => void;
   activeReplyComposerId: string | null;
   onReplyComposerChange: (noteId: string | null) => void;
@@ -969,6 +1089,7 @@ function ThreadPage({
   onGoUpLevel,
   onCreated,
   onUpdated,
+  onDeleted,
   onOpenThread,
   activeReplyComposerId,
   onReplyComposerChange,
@@ -1011,6 +1132,7 @@ function ThreadPage({
             onOpenThread={onOpenThread}
             onCreated={onCreated}
             onUpdated={onUpdated}
+            onDeleted={onDeleted}
             activeReplyComposerId={activeReplyComposerId}
             onReplyComposerChange={onReplyComposerChange}
             isFocused
@@ -1025,6 +1147,7 @@ function ThreadPage({
                       onOpenThread={onOpenThread}
                       onCreated={onCreated}
                       onUpdated={onUpdated}
+                      onDeleted={onDeleted}
                       activeReplyComposerId={activeReplyComposerId}
                       onReplyComposerChange={onReplyComposerChange}
                     />
@@ -1328,6 +1451,53 @@ export default function App(): ReactNode {
     [view, refreshRoots, refreshThread],
   );
 
+  const handleDeleted = useCallback(
+    async (note: Note) => {
+      try {
+        await api.deleteNote(note.id);
+        setError(null);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not delete note";
+        setError(message);
+        throw err;
+      }
+
+      setActiveReplyComposerId((prev) => (prev === note.id ? null : prev));
+      setRoots((prev) => prev.filter((candidate) => candidate.id !== note.id));
+      setSidebarThreads((prev) => prev.filter((candidate) => candidate.id !== note.id));
+
+      const deletedFocused = view.kind === "thread" && view.noteId === note.id;
+      const deletedAncestor =
+        view.kind === "thread" && !!thread?.ancestors.some((candidate) => candidate.id === note.id);
+
+      if (deletedFocused) {
+        setActiveReplyComposerId(null);
+        if (note.parentId) {
+          setView({ kind: "thread", noteId: note.parentId });
+          void refreshThread(note.parentId);
+        } else {
+          setView({ kind: "root" });
+          void refreshRoots();
+        }
+        return;
+      }
+
+      if (deletedAncestor) {
+        setActiveReplyComposerId(null);
+        setView({ kind: "root" });
+        void refreshRoots();
+        return;
+      }
+
+      if (view.kind === "root") {
+        void refreshRoots();
+      } else {
+        void refreshThread(view.noteId);
+      }
+    },
+    [view, thread, refreshRoots, refreshThread],
+  );
+
   // ⌘K focuses search.
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -1434,6 +1604,7 @@ export default function App(): ReactNode {
               activeTag={activeTag}
               onCreated={handleCreated}
               onUpdated={handleUpdated}
+              onDeleted={handleDeleted}
               onOpenThread={handleOpenThread}
               activeReplyComposerId={activeReplyComposerId}
               onReplyComposerChange={setActiveReplyComposerId}
@@ -1446,6 +1617,7 @@ export default function App(): ReactNode {
               onGoUpLevel={handleGoUpLevel}
               onCreated={handleCreated}
               onUpdated={handleUpdated}
+              onDeleted={handleDeleted}
               onOpenThread={handleOpenThread}
               activeReplyComposerId={activeReplyComposerId}
               onReplyComposerChange={setActiveReplyComposerId}

@@ -5,6 +5,7 @@ Endpoints:
 - GET /api/notes/{id}/thread     focused note with children + ancestor path
 - POST /api/notes                create root or child note
 - PATCH /api/notes/{id}          update note text
+- DELETE /api/notes/{id}         delete note subtree
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -153,3 +154,11 @@ async def update_note(note_id: str, payload: UpdateNoteIn) -> NoteOut:
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
     return NoteOut.from_note(note)
+
+
+@app.delete("/api/notes/{note_id}", status_code=204, response_class=Response)
+async def delete_note(note_id: str) -> Response:
+    deleted = await store.delete(note_id=note_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return Response(status_code=204)

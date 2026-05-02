@@ -310,7 +310,6 @@ kbd,
 .sidebar-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   overflow-y: auto;
   max-height: 100%;
   padding: 4px 2px 8px;
@@ -365,7 +364,7 @@ kbd,
   text-align: left;
   border: 1px solid transparent;
   background: transparent;
-  padding: 10px 12px;
+  padding: 7px 8px;
   border-radius: 10px;
   display: flex;
   flex-direction: column;
@@ -601,6 +600,13 @@ kbd {
 }
 .btn-primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 88%, var(--bg));
+}
+.btn-danger {
+  background: color-mix(in srgb, var(--danger) 90%, #000 10%);
+  color: #fff;
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 82%, #000 18%);
 }
 .btn-ghost {
   color: var(--text-2);
@@ -859,6 +865,47 @@ kbd {
 .thought-context-item:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.thought-context-item--danger {
+  color: color-mix(in srgb, var(--danger) 82%, var(--text-2) 18%);
+}
+.thought-context-item--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-2));
+  color: var(--danger);
+}
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, #000 45%, transparent);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 100;
+}
+.dialog {
+  width: min(440px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 16px;
+}
+.dialog-title {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text);
+}
+.dialog-body {
+  margin: 8px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.dialog-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .thought-children-wrap {

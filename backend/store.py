@@ -227,3 +227,28 @@ class NoteStore:
                 raise
             await conn.execute("COMMIT")
         return await self.get(note_id)
+
+    async def delete(self, note_id: str) -> bool:
+        # Make sure schema/WAL/PRAGMAs are initialized before write connection.
+        await self._ensure_conn()
+        async with aiosqlite.connect(
+            self._path, isolation_level=None
+        ) as conn:
+            await conn.execute("PRAGMA foreign_keys=ON")
+            await conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = await conn.execute(
+                    "DELETE FROM notes WHERE id = ?",
+                    (note_id,),
+                )
+                deleted_rows = cursor.rowcount
+                await cursor.close()
+                if deleted_rows == 0:
+                    await conn.execute("ROLLBACK")
+                    return False
+            except BaseException:
+                await conn.execute("ROLLBACK")
+                raise
+            await conn.execute("COMMIT")
+        return True
