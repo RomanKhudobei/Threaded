@@ -1087,6 +1087,7 @@ type ThreadPageProps = {
   thread: ThreadView | null;
   loading: boolean;
   error: string | null;
+  threadHeaderCompact: boolean;
   onGoUpLevel: () => void;
   onCreated: (note: Note) => void;
   onUpdated: (noteId: string, text: string) => Promise<void>;
@@ -1100,6 +1101,7 @@ function ThreadPage({
   thread,
   loading,
   error,
+  threadHeaderCompact,
   onGoUpLevel,
   onCreated,
   onUpdated,
@@ -1118,28 +1120,25 @@ function ThreadPage({
   const { note, children } = thread;
   return (
     <section className="thread-view thread-style-indent">
-      <div className="thread-view-header">
-        <div className="thread-view-heading">
-          <button
-            type="button"
-            className="thread-level-up"
-            onClick={onGoUpLevel}
-            aria-label="Go to previous thread level"
-            title="Previous level"
-          >
-            <Icons.ArrowLeft />
-          </button>
-          <div className="muted small">Following the thread.</div>
+      <section className={`thread-focus-header ${threadHeaderCompact ? "is-compact" : ""}`}>
+        <div className="thread-view-header">
+          <div className="thread-view-heading">
+            <button
+              type="button"
+              className="thread-level-up"
+              onClick={onGoUpLevel}
+              aria-label="Go to previous thread level"
+              title="Previous level"
+            >
+              <Icons.ArrowLeft />
+            </button>
+            <div className="muted small">Following the thread.</div>
+          </div>
+          <div className="thread-stats">
+            {children.length} {children.length === 1 ? "reply" : "replies"}
+          </div>
         </div>
-        <div className="thread-stats">
-          {children.length} {children.length === 1 ? "reply" : "replies"}
-        </div>
-      </div>
-
-      {error && <div className="banner banner-error">{error}</div>}
-
-      <div className="node depth-0">
-        <div className="node-content">
+        <div className="thread-focus-card">
           <ThoughtCard
             note={note}
             showRepliesChip={false}
@@ -1151,27 +1150,30 @@ function ThreadPage({
             onReplyComposerChange={onReplyComposerChange}
             isFocused
           />
-          {children.length > 0 && (
-            <div className="node__children">
-              {children.map((child) => (
-                <div key={child.id} className="node depth-1">
-                  <div className="node-content">
-                    <ThoughtCard
-                      note={child}
-                      onOpenThread={onOpenThread}
-                      onCreated={onCreated}
-                      onUpdated={onUpdated}
-                      onDeleted={onDeleted}
-                      activeReplyComposerId={activeReplyComposerId}
-                      onReplyComposerChange={onReplyComposerChange}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
-      </div>
+      </section>
+
+      {error && <div className="banner banner-error">{error}</div>}
+
+      {children.length > 0 && (
+        <div className="node__children">
+          {children.map((child) => (
+            <div key={child.id} className="node depth-1">
+              <div className="node-content">
+                <ThoughtCard
+                  note={child}
+                  onOpenThread={onOpenThread}
+                  onCreated={onCreated}
+                  onUpdated={onUpdated}
+                  onDeleted={onDeleted}
+                  activeReplyComposerId={activeReplyComposerId}
+                  onReplyComposerChange={onReplyComposerChange}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -1255,7 +1257,6 @@ function Breadcrumb({
     </div>
   );
 }
-
 // ——— main ———
 export default function App(): ReactNode {
   const [view, setView] = useState<View>(() => {
@@ -1284,6 +1285,7 @@ export default function App(): ReactNode {
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
   });
   const [isHeaderCompact, setIsHeaderCompact] = useState(false);
+  const [isThreadHeaderCompact, setIsThreadHeaderCompact] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -1293,8 +1295,12 @@ export default function App(): ReactNode {
   useEffect(() => {
     let rafId = 0;
     const updateHeaderState = () => {
-      const compact = window.scrollY > 42;
-      setIsHeaderCompact((prev) => (prev === compact ? prev : compact));
+      const rootCompact = window.scrollY > 42;
+      const threadCompact = window.scrollY > 68;
+      setIsHeaderCompact((prev) => (prev === rootCompact ? prev : rootCompact));
+      setIsThreadHeaderCompact((prev) =>
+        prev === threadCompact ? prev : threadCompact,
+      );
       rafId = 0;
     };
     const onScroll = () => {
@@ -1629,7 +1635,9 @@ export default function App(): ReactNode {
         }}
       />
 
-      <main className={`main ${view.kind === "root" && isHeaderCompact ? "is-header-compact" : ""}`}>
+      <main
+        className={`main ${view.kind === "root" && isHeaderCompact ? "is-header-compact" : ""} ${view.kind === "thread" && isThreadHeaderCompact ? "is-thread-header-compact" : ""}`}
+      >
         <header className="topbar">
           <Breadcrumb
             view={view}
@@ -1677,6 +1685,7 @@ export default function App(): ReactNode {
               thread={thread}
               loading={loading}
               error={error}
+              threadHeaderCompact={isThreadHeaderCompact}
               onGoUpLevel={handleGoUpLevel}
               onCreated={handleCreated}
               onUpdated={handleUpdated}
