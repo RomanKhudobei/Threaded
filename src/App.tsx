@@ -218,6 +218,13 @@ const Icons = {
       <path d="M4 8h8" />
     </svg>
   ),
+  More: () => (
+    <svg {...iconProps} aria-hidden="true">
+      <circle cx="3.5" cy="8" r="1" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+      <circle cx="12.5" cy="8" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  ),
 };
 
 // ——— wordmark / brand ———
@@ -382,8 +389,6 @@ function Composer({
 // ——— thought card ———
 type ThoughtCardProps = {
   note: Note;
-  children?: Note[];
-  canExpand?: boolean;
   isChildCard?: boolean;
   timestampStyle?: "full" | "time-only" | "hidden";
   showRepliesChip?: boolean;
@@ -397,8 +402,6 @@ type ThoughtCardProps = {
 
 function ThoughtCard({
   note,
-  children = [],
-  canExpand = false,
   isChildCard = false,
   timestampStyle = "full",
   showRepliesChip = true,
@@ -409,13 +412,12 @@ function ThoughtCard({
   onReplyComposerChange,
   isFocused,
 }: ThoughtCardProps) {
-  const childrenWrapRef = useRef<HTMLDivElement | null>(null);
-  const childrenListRef = useRef<HTMLDivElement | null>(null);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [draftText, setDraftText] = useState(note.text);
   const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const replying = activeReplyComposerId === note.id;
   const tags = useMemo(() => extractTags(note.text), [note.text]);
   const displayText = useMemo(
@@ -423,32 +425,6 @@ function ThoughtCard({
     [note.text],
   );
   const replies = note.childCount;
-  const canShowChildren = canExpand && children.length > 0;
-
-  useLayoutEffect(() => {
-    const wrap = childrenWrapRef.current;
-    const list = childrenListRef.current;
-    if (!wrap || !list || !canShowChildren || !isExpanded) return;
-    const update = () => {
-      const top = list.scrollTop > 2;
-      const bot = list.scrollTop + list.clientHeight < list.scrollHeight - 2;
-      wrap.dataset.shadowTop = top ? "1" : "0";
-      wrap.dataset.shadowBot = bot ? "1" : "0";
-    };
-    update();
-    list.addEventListener("scroll", update);
-    const ro = new ResizeObserver(update);
-    ro.observe(list);
-    return () => {
-      list.removeEventListener("scroll", update);
-      ro.disconnect();
-    };
-  }, [canShowChildren, isExpanded, children.length]);
-
-  useEffect(() => {
-    if (canShowChildren) return;
-    setIsExpanded(false);
-  }, [canShowChildren]);
 
   useEffect(() => {
     if (!isEditing) {
@@ -457,12 +433,37 @@ function ThoughtCard({
     }
   }, [note.text, isEditing]);
 
+  useEffect(() => {
+    if (!isActionsMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (actionsMenuRef.current?.contains(event.target as Node)) return;
+      setIsActionsMenuOpen(false);
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setIsActionsMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isActionsMenuOpen]);
+
   const cancelEdit = useCallback(() => {
     if (savingEdit) return;
     setIsEditing(false);
     setDraftText(note.text);
     setEditError(null);
   }, [savingEdit, note.text]);
+
+  const openEditor = useCallback(() => {
+    onReplyComposerChange(null);
+    setIsEditing(true);
+    setDraftText(note.text);
+    setEditError(null);
+    setIsActionsMenuOpen(false);
+  }, [note.text, onReplyComposerChange]);
 
   const submitEdit = useCallback(async () => {
     const trimmed = draftText.trim();
@@ -544,11 +545,30 @@ function ThoughtCard({
           <p className="thought-body">{displayText}</p>
         )}
         <div className="thought-meta">
-          {timestampStyle !== "hidden" && (
-            <time className="ts" dateTime={note.createdAt}>
-              {timestampStyle === "time-only" ? fmtTime(note.createdAt) : fmtTimestamp(note.createdAt)}
-            </time>
-          )}
+          <div className="thought-meta-left">
+            {timestampStyle !== "hidden" && (
+              <time className="ts" dateTime={note.createdAt}>
+                {timestampStyle === "time-only" ? fmtTime(note.createdAt) : fmtTimestamp(note.createdAt)}
+              </time>
+            )}
+            {showRepliesChip && replies > 0 && (
+              <>
+                {timestampStyle !== "hidden" && (
+                  <span className="meta-sep" aria-hidden="true">
+                    •
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="meta-inline-btn"
+                  onClick={() => onOpenThread(note.id)}
+                  title="Open replies"
+                >
+                  {replies} {replies === 1 ? "reply" : "replies"} <Icons.Chevron />
+                </button>
+              </>
+            )}
+          </div>
           {tags.length > 0 && (
             <span className="tags">
               {tags.map((t) => (
@@ -559,48 +579,42 @@ function ThoughtCard({
             </span>
           )}
           <span className="thought-spacer" />
-          {canShowChildren && (
-            <button
-              type="button"
-              className={`meta-btn meta-btn--icon thought-expand-btn ${isExpanded ? "is-expanded" : ""}`}
-              onClick={() => setIsExpanded((prev) => !prev)}
-              aria-label={isExpanded ? "Hide children" : "Show children"}
-              aria-expanded={isExpanded}
-              title={isExpanded ? "Hide children" : "Show children"}
-            >
-              {isExpanded ? "Hide" : "Show"} <Icons.ChevronDown />
-            </button>
-          )}
-          {showRepliesChip && replies > 0 && (
-            <button
-              type="button"
-              className="meta-btn"
-              onClick={() => onOpenThread(note.id)}
-              title="Open replies"
-            >
-              {replies} {replies === 1 ? "reply" : "replies"}
-              <Icons.Chevron />
-            </button>
-          )}
-          <button
-            type="button"
-            className={`meta-btn ${isEditing ? "is-active" : ""}`}
-            onClick={() => {
-              if (isEditing) {
-                cancelEdit();
-                return;
-              }
-              onReplyComposerChange(null);
-              setIsEditing(true);
-              setDraftText(note.text);
-              setEditError(null);
-            }}
-            aria-label={isEditing ? "Close editor" : "Edit thought"}
-            title={isEditing ? "Close editor" : "Edit thought"}
-            disabled={savingEdit}
+          <div
+            className={`thought-actions ${isActionsMenuOpen ? "is-open" : ""}`}
+            ref={actionsMenuRef}
           >
-            Edit
-          </button>
+            <button
+              type="button"
+              className={`meta-btn meta-btn--icon meta-more-btn ${isActionsMenuOpen ? "is-active" : ""}`}
+              onClick={() => setIsActionsMenuOpen((prev) => !prev)}
+              aria-label="Open thought menu"
+              aria-expanded={isActionsMenuOpen}
+              aria-haspopup="menu"
+              title="More"
+            >
+              <Icons.More />
+            </button>
+            <div
+              className={`thought-context-menu ${isActionsMenuOpen ? "is-open" : ""}`}
+              role="menu"
+            >
+              <button
+                type="button"
+                className="thought-context-item"
+                onClick={() => {
+                  if (isEditing) {
+                    cancelEdit();
+                  } else {
+                    openEditor();
+                  }
+                }}
+                role="menuitem"
+                disabled={savingEdit}
+              >
+                {isEditing ? "Close editor" : "Edit"}
+              </button>
+            </div>
+          </div>
           <button
             type="button"
             className={`meta-btn ${replying ? "is-active" : ""}`}
@@ -618,28 +632,6 @@ function ThoughtCard({
           </button>
         </div>
       </article>
-      {canShowChildren && isExpanded && (
-        <div className="thought-children-wrap" ref={childrenWrapRef}>
-          <div className="thought-children-scroll" ref={childrenListRef}>
-            {children.map((child) => (
-              <ThoughtCard
-                key={child.id}
-                note={child}
-                canExpand={false}
-                isChildCard
-                timestampStyle={timestampStyle}
-                onOpenThread={onOpenThread}
-                onCreated={onCreated}
-                onUpdated={onUpdated}
-                activeReplyComposerId={activeReplyComposerId}
-                onReplyComposerChange={onReplyComposerChange}
-              />
-            ))}
-          </div>
-          <div className="scroll-shadow scroll-shadow--top" aria-hidden="true" />
-          <div className="scroll-shadow scroll-shadow--bottom" aria-hidden="true" />
-        </div>
-      )}
       {replying && (
         <div className="thought-reply">
           <Composer
@@ -884,9 +876,6 @@ function RootView({
   activeReplyComposerId,
   onReplyComposerChange,
 }: RootViewProps) {
-  const [childrenByParentId, setChildrenByParentId] = useState<
-    Record<string, Note[]>
-  >({});
   const groupedRoots = useMemo(() => {
     const out: { key: string; label: string; notes: Note[] }[] = [];
     const groupIndexByKey = new Map<string, number>();
@@ -905,36 +894,6 @@ function RootView({
       out[existingIdx].notes.push(root);
     }
     return out;
-  }, [roots]);
-
-  useEffect(() => {
-    const parents = roots.filter((root) => root.childCount > 0);
-    if (parents.length === 0) {
-      setChildrenByParentId({});
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      const pairs = await Promise.all(
-        parents.map(async (root) => {
-          try {
-            const children = await api.listByParent(root.id);
-            return [root.id, sortByNewest(children)] as const;
-          } catch {
-            return [root.id, [] as Note[]] as const;
-          }
-        }),
-      );
-      if (cancelled) return;
-      const next: Record<string, Note[]> = {};
-      for (const [parentId, children] of pairs) {
-        next[parentId] = children;
-      }
-      setChildrenByParentId(next);
-    })();
-    return () => {
-      cancelled = true;
-    };
   }, [roots]);
 
   return (
@@ -971,8 +930,6 @@ function RootView({
                   <article key={root.id} className="feed-item">
                     <ThoughtCard
                       note={root}
-                      children={childrenByParentId[root.id] ?? []}
-                      canExpand
                       timestampStyle="time-only"
                       onOpenThread={onOpenThread}
                       onCreated={onCreated}
@@ -1015,48 +972,6 @@ function ThreadPage({
   activeReplyComposerId,
   onReplyComposerChange,
 }: ThreadPageProps) {
-  const [childrenByParentId, setChildrenByParentId] = useState<
-    Record<string, Note[]>
-  >({});
-
-  useEffect(() => {
-    if (!thread) {
-      setChildrenByParentId({});
-      return;
-    }
-
-    const parents = thread.children.filter((candidate) => candidate.childCount > 0);
-    if (parents.length === 0) {
-      setChildrenByParentId({});
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      const pairs = await Promise.all(
-        parents.map(async (parent) => {
-          try {
-            const children = await api.listByParent(parent.id);
-            return [parent.id, sortByNewest(children)] as const;
-          } catch {
-            return [parent.id, [] as Note[]] as const;
-          }
-        }),
-      );
-
-      if (cancelled) return;
-      const next: Record<string, Note[]> = {};
-      for (const [parentId, children] of pairs) {
-        next[parentId] = children;
-      }
-      setChildrenByParentId(next);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [thread]);
-
   if (loading && !thread) {
     return <div className="loading">Loading thread…</div>;
   }
@@ -1106,8 +1021,6 @@ function ThreadPage({
                   <div className="node-content">
                     <ThoughtCard
                       note={child}
-                      children={childrenByParentId[child.id] ?? []}
-                      canExpand
                       onOpenThread={onOpenThread}
                       onCreated={onCreated}
                       onUpdated={onUpdated}
