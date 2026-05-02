@@ -137,10 +137,10 @@ if data ever gets corrupted into a cycle.
 - [ ] Refine shortcuts (ctrl+n for new note, arrows up and down to navigate thoughts, enter to go one level deeper, backspace to go one level upper)
 - [ ] Add tags
 - [ ] Add date range filter
-- [ ] Add ability to edit thoughts
-- [ ] Add ability to delete thoughts (send them into 30-day retention trash)
+- [x] Add ability to edit thoughts
+- [x] Add ability to delete thoughts (send them into 30-day retention trash?)
 - [x] Add collapse arrow for opening threads
-- [ ] Make composer sticky at the top
+- [x] Make composer sticky at the top
 - [ ] Add sort/filter on main canvas (somewhere near composer). It should stay on each thread. Add
 list of popular tags with counts
 - [x] Add grouping by date for better visibility and structure
@@ -148,7 +148,8 @@ list of popular tags with counts
 - [ ] Deploy
 - [ ] Add colors?
 - [x] Implement tree-like navigation for thoughts (or in sidebar display adjacent cards, instead of roots)
-- [ ] Add thought spaces
+- [x] Add thought spaces
 - [ ] Add reactions and filter by reaction
 - [ ] Add buy me a coffee link
 - [ ] Додати маркери, виділення тексту, text editor 
+- [ ] Fix search (search by all? Only by listed?)

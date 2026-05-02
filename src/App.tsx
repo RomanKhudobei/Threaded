@@ -13,10 +13,17 @@ import {
 
 type Note = {
   id: string;
+  spaceId: string;
   parentId: string | null;
   text: string;
   createdAt: string;
   childCount: number;
+};
+
+type Space = {
+  id: string;
+  name: string;
+  createdAt: string;
 };
 
 type ThreadView = {
@@ -28,29 +35,50 @@ type ThreadView = {
 };
 
 type View =
-  | { kind: "root" }
-  | { kind: "thread"; noteId: string };
+  | { kind: "root"; spaceId: string | null }
+  | { kind: "thread"; spaceId: string | null; noteId: string };
 
 type SidebarMode = "roots" | "siblings";
+type SpaceModalState =
+  | { kind: "new" }
+  | { kind: "rename"; spaceId: string }
+  | { kind: "delete"; spaceId: string }
+  | null;
 
 const API_BASE = "/api";
+const SPACE_ROUTE_PREFIX = "/space/";
 const THREAD_ROUTE_PREFIX = "/thread/";
 
 function viewFromPath(pathname: string): View {
+  if (pathname.startsWith(SPACE_ROUTE_PREFIX)) {
+    const parts = pathname.split("/").filter(Boolean);
+    const encodedSpaceId = parts[1];
+    const spaceId = encodedSpaceId ? decodeURIComponent(encodedSpaceId) : null;
+    if (parts[2] === "thread" && parts[3]) {
+      return {
+        kind: "thread",
+        spaceId,
+        noteId: decodeURIComponent(parts[3]),
+      };
+    }
+    return { kind: "root", spaceId };
+  }
   if (pathname.startsWith(THREAD_ROUTE_PREFIX)) {
     const encodedId = pathname.slice(THREAD_ROUTE_PREFIX.length);
     if (encodedId) {
-      return { kind: "thread", noteId: decodeURIComponent(encodedId) };
+      return { kind: "thread", spaceId: null, noteId: decodeURIComponent(encodedId) };
     }
   }
-  return { kind: "root" };
+  return { kind: "root", spaceId: null };
 }
 
 function pathFromView(view: View): string {
+  if (!view.spaceId) return "/";
+  const encodedSpaceId = encodeURIComponent(view.spaceId);
   if (view.kind === "thread") {
-    return `${THREAD_ROUTE_PREFIX}${encodeURIComponent(view.noteId)}`;
+    return `${SPACE_ROUTE_PREFIX}${encodedSpaceId}${THREAD_ROUTE_PREFIX}${encodeURIComponent(view.noteId)}`;
   }
-  return "/";
+  return `${SPACE_ROUTE_PREFIX}${encodedSpaceId}`;
 }
 
 function viewKey(view: View): string {
@@ -76,25 +104,61 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const api = {
-  listRoots: () => http<Note[]>("/notes"),
-  listByParent: (parentId: string) =>
-    http<Note[]>(`/notes?parentId=${encodeURIComponent(parentId)}`),
-  getThread: (id: string) => http<ThreadView>(`/notes/${id}/thread`),
-  createNote: (text: string, parentId: string | null) =>
-    http<Note>("/notes", {
+  listSpaces: () => http<Space[]>("/spaces"),
+  createSpace: (name: string) =>
+    http<Space>("/spaces", {
       method: "POST",
-      body: JSON.stringify({ text, parentId }),
+      body: JSON.stringify({ name }),
     }),
-  updateNote: (id: string, text: string) =>
-    http<Note>(`/notes/${encodeURIComponent(id)}`, {
+  updateSpace: (id: string, name: string) =>
+    http<Space>(`/spaces/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ name }),
     }),
-  deleteNote: async (id: string) => {
-    const res = await fetch(`${API_BASE}/notes/${encodeURIComponent(id)}`, {
+  deleteSpace: async (id: string) => {
+    const res = await fetch(`${API_BASE}/spaces/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
     });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        if (body && typeof body.detail === "string") detail = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail || `Request failed (${res.status})`);
+    }
+  },
+  listRoots: (spaceId: string) =>
+    http<Note[]>(`/notes?spaceId=${encodeURIComponent(spaceId)}`),
+  listByParent: (spaceId: string, parentId: string) =>
+    http<Note[]>(
+      `/notes?spaceId=${encodeURIComponent(spaceId)}&parentId=${encodeURIComponent(parentId)}`,
+    ),
+  getThread: (spaceId: string, id: string) =>
+    http<ThreadView>(
+      `/notes/${encodeURIComponent(id)}/thread?spaceId=${encodeURIComponent(spaceId)}`,
+    ),
+  createNote: (spaceId: string, text: string, parentId: string | null) =>
+    http<Note>("/notes", {
+      method: "POST",
+      body: JSON.stringify({ text, parentId, spaceId }),
+    }),
+  updateNote: (spaceId: string, id: string, text: string) =>
+    http<Note>(`/notes/${encodeURIComponent(id)}?spaceId=${encodeURIComponent(spaceId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ text }),
+    }),
+  deleteNote: async (spaceId: string, id: string) => {
+    const res = await fetch(
+      `${API_BASE}/notes/${encodeURIComponent(id)}?spaceId=${encodeURIComponent(spaceId)}`,
+      {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      },
+    );
     if (!res.ok) {
       let detail = res.statusText;
       try {
@@ -299,6 +363,7 @@ function RotatingTagline() {
 
 // ——— composer ———
 type ComposerProps = {
+  spaceId: string;
   parentId: string | null;
   placeholder: string;
   ctaLabel?: string;
@@ -310,6 +375,7 @@ type ComposerProps = {
 };
 
 function Composer({
+  spaceId,
   parentId,
   placeholder,
   ctaLabel = "Add thought",
@@ -336,7 +402,7 @@ function Composer({
       setSubmitting(true);
       setError(null);
       try {
-        const note = await api.createNote(trimmed, parentId);
+        const note = await api.createNote(spaceId, trimmed, parentId);
         setText("");
         onCreated(note);
       } catch (err) {
@@ -345,7 +411,7 @@ function Composer({
         setSubmitting(false);
       }
     },
-    [text, parentId, onCreated],
+    [spaceId, text, parentId, onCreated],
   );
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -718,6 +784,7 @@ function ThoughtCard({
       {replying && (
         <div className="thought-reply">
           <Composer
+            spaceId={note.spaceId}
             parentId={note.id}
             placeholder="Continue the thread…"
             ctaLabel="Reply"
@@ -780,6 +847,12 @@ function ThoughtCard({
 
 // ——— sidebar ———
 type SidebarProps = {
+  spaces: Space[];
+  activeSpaceId: string | null;
+  onSelectSpace: (spaceId: string) => void;
+  onCreateSpace: () => void;
+  onRenameSpace: (spaceId: string) => void;
+  onDeleteSpace: (spaceId: string) => void;
   items: Note[];
   mode: SidebarMode;
   currentThreadId: string | null;
@@ -793,6 +866,12 @@ type SidebarProps = {
 };
 
 function Sidebar({
+  spaces,
+  activeSpaceId,
+  onSelectSpace,
+  onCreateSpace,
+  onRenameSpace,
+  onDeleteSpace,
   items,
   mode,
   currentThreadId,
@@ -806,6 +885,9 @@ function Sidebar({
 }: SidebarProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const [isSpaceSelectOpen, setIsSpaceSelectOpen] = useState(false);
+  const [isSpaceMenuOpen, setIsSpaceMenuOpen] = useState(false);
+  const currentSpace = spaces.find((space) => space.id === activeSpaceId) ?? spaces[0] ?? null;
 
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
@@ -838,6 +920,19 @@ function Sidebar({
     activeItem.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [currentThreadId, items]);
 
+  useEffect(() => {
+    if (!isSpaceMenuOpen && !isSpaceSelectOpen) return;
+    const onPointerDown = (event: globalThis.MouseEvent) => {
+      const target = event.target as Element | null;
+      const control = target?.closest<HTMLElement>(".sidebar-space-control");
+      if (control) return;
+      setIsSpaceSelectOpen(false);
+      setIsSpaceMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, [isSpaceMenuOpen, isSpaceSelectOpen]);
+
   return (
     <aside className="sidebar" ref={wrapRef}>
       <div className="sidebar-brand">
@@ -852,23 +947,100 @@ function Sidebar({
         </span>
       </button>
 
-      <div className="sidebar-search">
-        <Icons.Search />
-        <input
-          placeholder="Search thoughts"
-          value={query}
-          onChange={(e) => onQueryChange(e.target.value)}
-        />
-        {query && (
+      <div className="sidebar-section">
+        <div className="sidebar-label">Space</div>
+        <div className="sidebar-space-control">
+          <div className="sidebar-space-selector">
+            <button
+              type="button"
+              className={`sidebar-space-trigger ${isSpaceSelectOpen ? "is-open" : ""}`}
+              onClick={() => {
+                setIsSpaceMenuOpen(false);
+                setIsSpaceSelectOpen((prev) => !prev);
+              }}
+              aria-haspopup="listbox"
+              aria-expanded={isSpaceSelectOpen}
+              aria-label="Select space"
+            >
+              <span className="sidebar-space-trigger-label">
+                {currentSpace?.name ?? "Select space"}
+              </span>
+              <span className={`sidebar-space-trigger-chevron ${isSpaceSelectOpen ? "is-open" : ""}`}>
+                <Icons.ChevronDown />
+              </span>
+            </button>
+            {isSpaceSelectOpen && (
+              <div className="sidebar-space-dropdown" role="listbox" aria-label="Spaces">
+                {spaces.map((space) => (
+                  <button
+                    key={space.id}
+                    type="button"
+                    className={`sidebar-space-option ${activeSpaceId === space.id ? "is-active" : ""}`}
+                    role="option"
+                    aria-selected={activeSpaceId === space.id}
+                    onClick={() => {
+                      setIsSpaceSelectOpen(false);
+                      onSelectSpace(space.id);
+                    }}
+                  >
+                    {space.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="button"
-            className="search-clear"
-            onClick={() => onQueryChange("")}
-            aria-label="Clear search"
+            className="sidebar-space-add"
+            onClick={onCreateSpace}
+            aria-label="Create new space"
+            title="New space"
           >
-            <Icons.X />
+            <Icons.Plus />
           </button>
-        )}
+          <div className="sidebar-space-menu">
+            <button
+              type="button"
+              className="sidebar-space-menu-trigger sidebar-space-menu-trigger--visible"
+              aria-label="Space actions"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsSpaceSelectOpen(false);
+                setIsSpaceMenuOpen((prev) => !prev);
+              }}
+            >
+              <Icons.More />
+            </button>
+            {isSpaceMenuOpen && (
+              <div className="sidebar-space-menu-popover" role="menu">
+                <button
+                  type="button"
+                  className="sidebar-space-menu-item"
+                  onClick={() => {
+                    setIsSpaceMenuOpen(false);
+                    if (activeSpaceId) onRenameSpace(activeSpaceId);
+                  }}
+                  role="menuitem"
+                  disabled={!activeSpaceId}
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  className="sidebar-space-menu-item sidebar-space-menu-item--danger"
+                  onClick={() => {
+                    setIsSpaceMenuOpen(false);
+                    if (activeSpaceId) onDeleteSpace(activeSpaceId);
+                  }}
+                  role="menuitem"
+                  disabled={!activeSpaceId}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {tags.length > 0 && (
@@ -894,6 +1066,24 @@ function Sidebar({
         <div className="sidebar-label">
           {mode === "siblings" ? "Siblings" : "All threads"}{" "}
           <span className="muted">{items.length}</span>
+        </div>
+        <div className="sidebar-search">
+          <Icons.Search />
+          <input
+            placeholder="Search"
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+          />
+          {query && (
+            <button
+              type="button"
+              className="search-clear"
+              onClick={() => onQueryChange("")}
+              aria-label="Clear search"
+            >
+              <Icons.X />
+            </button>
+          )}
         </div>
         <div className="sidebar-list-wrap">
           <div className="sidebar-list" ref={listRef}>
@@ -989,6 +1179,7 @@ function EmptyState({
 
 // ——— root view (feed) ———
 type RootViewProps = {
+  activeSpaceId: string;
   roots: Note[];
   loading: boolean;
   error: string | null;
@@ -1004,6 +1195,7 @@ type RootViewProps = {
 };
 
 function RootView({
+  activeSpaceId,
   roots,
   loading,
   error,
@@ -1047,6 +1239,7 @@ function RootView({
 
         <section className="composer-wrap">
           <Composer
+            spaceId={activeSpaceId}
             parentId={null}
             placeholder="What's on your mind?"
             ctaLabel="Add thought"
@@ -1192,6 +1385,7 @@ function ThreadPage({
 // ——— breadcrumb (topbar) ———
 function Breadcrumb({
   view,
+  currentSpaceName,
   thread,
   query,
   activeTag,
@@ -1200,6 +1394,7 @@ function Breadcrumb({
   onOpenThread,
 }: {
   view: View;
+  currentSpaceName: string;
   thread: ThreadView | null;
   query: string;
   activeTag: string | null;
@@ -1210,6 +1405,8 @@ function Breadcrumb({
   if (view.kind === "root") {
     return (
       <div className="topbar-crumbs">
+        <span className="crumb">{currentSpaceName}</span>
+        <span className="crumb-sep">/</span>
         <span className="crumb is-current">All thoughts</span>
         {(query || activeTag) && (
           <>
@@ -1231,6 +1428,8 @@ function Breadcrumb({
   }
   return (
     <div className="topbar-crumbs">
+      <span className="crumb">{currentSpaceName}</span>
+      <span className="crumb-sep">/</span>
       <button type="button" className="crumb" onClick={onBack}>
         All thoughts
       </button>
@@ -1271,9 +1470,10 @@ function Breadcrumb({
 // ——— main ———
 export default function App(): ReactNode {
   const [view, setView] = useState<View>(() => {
-    if (typeof window === "undefined") return { kind: "root" };
+    if (typeof window === "undefined") return { kind: "root", spaceId: null };
     return viewFromPath(window.location.pathname);
   });
+  const [spaces, setSpaces] = useState<Space[]>([]);
   const [roots, setRoots] = useState<Note[]>([]);
   const [sidebarThreads, setSidebarThreads] = useState<Note[]>([]);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("roots");
@@ -1285,6 +1485,10 @@ export default function App(): ReactNode {
   const [activeReplyComposerId, setActiveReplyComposerId] = useState<string | null>(
     null,
   );
+  const [spaceModal, setSpaceModal] = useState<SpaceModalState>(null);
+  const [spaceNameDraft, setSpaceNameDraft] = useState("");
+  const [spaceModalBusy, setSpaceModalBusy] = useState(false);
+  const [spaceModalError, setSpaceModalError] = useState<string | null>(null);
   const didSyncRouteRef = useRef(false);
   const scrollPositionsRef = useRef<Map<string, number>>(new Map());
   const pendingScrollRestoreRef = useRef<number | null>(null);
@@ -1297,11 +1501,28 @@ export default function App(): ReactNode {
   });
   const [isHeaderCompact, setIsHeaderCompact] = useState(false);
   const [isThreadHeaderCompact, setIsThreadHeaderCompact] = useState(false);
+  const fallbackSpaceId = spaces[0]?.id ?? null;
+  const currentSpaceId = view.spaceId ?? fallbackSpaceId;
+  const currentSpaceName =
+    spaces.find((space) => space.id === currentSpaceId)?.name ?? "Space";
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     window.localStorage.setItem("threaded-theme", dark ? "dark" : "light");
   }, [dark]);
+
+  const refreshSpaces = useCallback(async () => {
+    try {
+      const data = await api.listSpaces();
+      setSpaces(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load spaces");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSpaces();
+  }, [refreshSpaces]);
 
   useEffect(() => {
     let rafId = 0;
@@ -1351,6 +1572,15 @@ export default function App(): ReactNode {
     return () => window.removeEventListener("popstate", onPopState);
   }, [view]);
 
+  useEffect(() => {
+    if (spaces.length === 0) return;
+    const active = view.spaceId;
+    const isKnownSpace = !!active && spaces.some((space) => space.id === active);
+    if (isKnownSpace) return;
+    const nextSpaceId = spaces[0].id;
+    setView({ kind: "root", spaceId: nextSpaceId });
+  }, [view.spaceId, spaces]);
+
   useLayoutEffect(() => {
     if (pendingScrollRestoreRef.current === null) return;
     if (loading) return;
@@ -1378,11 +1608,11 @@ export default function App(): ReactNode {
     [view],
   );
 
-  const refreshRoots = useCallback(async () => {
+  const refreshRoots = useCallback(async (spaceId: string) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.listRoots();
+      const data = await api.listRoots(spaceId);
       setRoots(sortByNewest(data));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load notes");
@@ -1391,11 +1621,11 @@ export default function App(): ReactNode {
     }
   }, []);
 
-  const refreshThread = useCallback(async (noteId: string) => {
+  const refreshThread = useCallback(async (spaceId: string, noteId: string) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.getThread(noteId);
+      const data = await api.getThread(spaceId, noteId);
       setThread(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load thread");
@@ -1406,14 +1636,16 @@ export default function App(): ReactNode {
   }, []);
 
   useEffect(() => {
+    if (!currentSpaceId) return;
     if (view.kind === "root") {
-      void refreshRoots();
+      void refreshRoots(currentSpaceId);
     } else {
-      void refreshThread(view.noteId);
+      void refreshThread(currentSpaceId, view.noteId);
     }
-  }, [view, refreshRoots, refreshThread]);
+  }, [view, currentSpaceId, refreshRoots, refreshThread]);
 
   useEffect(() => {
+    if (!currentSpaceId) return;
     const setRootsSidebar = () => {
       setSidebarMode("roots");
       setSidebarThreads(roots);
@@ -1438,7 +1670,7 @@ export default function App(): ReactNode {
 
     void (async () => {
       try {
-        const siblings = await api.listByParent(parentId);
+        const siblings = await api.listByParent(currentSpaceId, parentId);
         if (cancelled) return;
         if (view.kind !== "thread" || view.noteId !== selectedNoteId) return;
         setSidebarThreads(sortByNewest(siblings));
@@ -1452,7 +1684,7 @@ export default function App(): ReactNode {
     return () => {
       cancelled = true;
     };
-  }, [view, thread, roots]);
+  }, [view, thread, roots, currentSpaceId]);
 
   const handleCreated = useCallback(
     (note: Note) => {
@@ -1473,22 +1705,25 @@ export default function App(): ReactNode {
         );
         return;
       }
-      if (view.kind === "root") void refreshRoots();
-      else void refreshThread(view.noteId);
+      if (!currentSpaceId) return;
+      if (view.kind === "root") void refreshRoots(currentSpaceId);
+      else void refreshThread(currentSpaceId, view.noteId);
     },
-    [view, refreshRoots, refreshThread],
+    [view, refreshRoots, refreshThread, currentSpaceId],
   );
 
   const handleOpenThread = useCallback(
     (id: string) => {
-      navigateToView({ kind: "thread", noteId: id });
+      if (!currentSpaceId) return;
+      navigateToView({ kind: "thread", spaceId: currentSpaceId, noteId: id });
     },
-    [navigateToView],
+    [navigateToView, currentSpaceId],
   );
 
   const handleBack = useCallback(() => {
-    navigateToView({ kind: "root" });
-  }, [navigateToView]);
+    if (!currentSpaceId) return;
+    navigateToView({ kind: "root", spaceId: currentSpaceId });
+  }, [navigateToView, currentSpaceId]);
 
   const handleGoUpLevel = useCallback(() => {
     const parentId = thread?.note.parentId;
@@ -1501,8 +1736,9 @@ export default function App(): ReactNode {
 
   const handleUpdated = useCallback(
     async (noteId: string, text: string) => {
+      if (!currentSpaceId) return;
       try {
-        const updated = await api.updateNote(noteId, text);
+        const updated = await api.updateNote(currentSpaceId, noteId, text);
         setError(null);
 
         setRoots((prev) =>
@@ -1524,21 +1760,22 @@ export default function App(): ReactNode {
         });
 
         // Keep expanded descendants in sync when they are not in local thread state.
-        if (view.kind === "root") void refreshRoots();
-        else void refreshThread(view.noteId);
+        if (view.kind === "root") void refreshRoots(currentSpaceId);
+        else void refreshThread(currentSpaceId, view.noteId);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not update note";
         setError(message);
         throw err;
       }
     },
-    [view, refreshRoots, refreshThread],
+    [view, refreshRoots, refreshThread, currentSpaceId],
   );
 
   const handleDeleted = useCallback(
     async (note: Note) => {
+      if (!currentSpaceId) return;
       try {
-        await api.deleteNote(note.id);
+        await api.deleteNote(currentSpaceId, note.id);
         setError(null);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not delete note";
@@ -1556,29 +1793,120 @@ export default function App(): ReactNode {
 
       if (deletedFocused) {
         if (note.parentId) {
-          navigateToView({ kind: "thread", noteId: note.parentId });
-          void refreshThread(note.parentId);
+          navigateToView({ kind: "thread", spaceId: currentSpaceId, noteId: note.parentId });
+          void refreshThread(currentSpaceId, note.parentId);
         } else {
-          navigateToView({ kind: "root" });
-          void refreshRoots();
+          navigateToView({ kind: "root", spaceId: currentSpaceId });
+          void refreshRoots(currentSpaceId);
         }
         return;
       }
 
       if (deletedAncestor) {
-        navigateToView({ kind: "root" });
-        void refreshRoots();
+        navigateToView({ kind: "root", spaceId: currentSpaceId });
+        void refreshRoots(currentSpaceId);
         return;
       }
 
       if (view.kind === "root") {
-        void refreshRoots();
+        void refreshRoots(currentSpaceId);
       } else {
-        void refreshThread(view.noteId);
+        void refreshThread(currentSpaceId, view.noteId);
       }
     },
-    [view, thread, navigateToView, refreshRoots, refreshThread],
+    [view, thread, navigateToView, refreshRoots, refreshThread, currentSpaceId],
   );
+
+  const handleSelectSpace = useCallback(
+    (spaceId: string) => {
+      setQuery("");
+      setActiveTag(null);
+      if (view.kind === "thread") {
+        navigateToView({ kind: "root", spaceId });
+      } else {
+        navigateToView({ kind: "root", spaceId });
+      }
+    },
+    [view.kind, navigateToView],
+  );
+
+  const closeSpaceModal = useCallback(() => {
+    if (spaceModalBusy) return;
+    setSpaceModal(null);
+    setSpaceNameDraft("");
+    setSpaceModalError(null);
+  }, [spaceModalBusy]);
+
+  const handleCreateSpace = useCallback(() => {
+    setSpaceModal({ kind: "new" });
+    setSpaceNameDraft("");
+    setSpaceModalError(null);
+  }, []);
+
+  const handleRenameSpace = useCallback(
+    (targetSpaceId: string) => {
+      const current = spaces.find((space) => space.id === targetSpaceId);
+      setSpaceModal({ kind: "rename", spaceId: targetSpaceId });
+      setSpaceNameDraft(current?.name ?? "");
+      setSpaceModalError(null);
+    },
+    [spaces],
+  );
+
+  const handleDeleteSpace = useCallback((targetSpaceId: string) => {
+    setSpaceModal({ kind: "delete", spaceId: targetSpaceId });
+    setSpaceModalError(null);
+  }, []);
+
+  const submitSpaceModal = useCallback(async () => {
+    if (!spaceModal) return;
+    setSpaceModalBusy(true);
+    setSpaceModalError(null);
+    try {
+      if (spaceModal.kind === "new") {
+        const name = spaceNameDraft.trim();
+        if (!name) {
+          setSpaceModalError("Space name cannot be empty");
+          return;
+        }
+        const created = await api.createSpace(name);
+        setError(null);
+        await refreshSpaces();
+        navigateToView({ kind: "root", spaceId: created.id });
+      } else if (spaceModal.kind === "rename") {
+        const name = spaceNameDraft.trim();
+        if (!name) {
+          setSpaceModalError("Space name cannot be empty");
+          return;
+        }
+        await api.updateSpace(spaceModal.spaceId, name);
+        setError(null);
+        await refreshSpaces();
+      } else {
+        await api.deleteSpace(spaceModal.spaceId);
+        setError(null);
+        const refreshed = await api.listSpaces();
+        setSpaces(refreshed);
+        const stillHasCurrent =
+          !!currentSpaceId && refreshed.some((space) => space.id === currentSpaceId);
+        if (!stillHasCurrent && refreshed[0]?.id) {
+          navigateToView({ kind: "root", spaceId: refreshed[0].id });
+        }
+      }
+      setSpaceModal(null);
+      setSpaceNameDraft("");
+      setSpaceModalError(null);
+    } catch (err) {
+      setSpaceModalError(err instanceof Error ? err.message : "Space action failed");
+    } finally {
+      setSpaceModalBusy(false);
+    }
+  }, [spaceModal, spaceNameDraft, currentSpaceId, navigateToView, refreshSpaces]);
+
+  const modalTargetSpace =
+    spaceModal && spaceModal.kind !== "new"
+      ? spaces.find((space) => space.id === spaceModal.spaceId) ?? null
+      : null;
 
   // ⌘K focuses search.
   useEffect(() => {
@@ -1617,27 +1945,42 @@ export default function App(): ReactNode {
   }, [roots, query, activeTag]);
 
   const currentThreadId = view.kind === "thread" ? view.noteId : null;
+  if (spaces.length === 0) {
+    return (
+      <div className="app">
+        <main className="main">
+          <div className="loading">Loading spaces…</div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
       <Sidebar
+        spaces={spaces}
+        activeSpaceId={currentSpaceId}
+        onSelectSpace={handleSelectSpace}
+        onCreateSpace={handleCreateSpace}
+        onRenameSpace={handleRenameSpace}
+        onDeleteSpace={handleDeleteSpace}
         items={sidebarThreads}
         mode={sidebarMode}
         currentThreadId={currentThreadId}
         query={query}
         onQueryChange={(q) => {
           setQuery(q);
-          navigateToView({ kind: "root" });
+          if (currentSpaceId) navigateToView({ kind: "root", spaceId: currentSpaceId });
         }}
         activeTag={activeTag}
         onTagClick={(t) => {
           setActiveTag((prev) => (prev === t ? null : t));
-          navigateToView({ kind: "root" });
+          if (currentSpaceId) navigateToView({ kind: "root", spaceId: currentSpaceId });
         }}
         tags={tags}
         onSelect={handleOpenThread}
         onNew={() => {
-          navigateToView({ kind: "root" });
+          if (currentSpaceId) navigateToView({ kind: "root", spaceId: currentSpaceId });
           window.setTimeout(() => {
             document
               .querySelector<HTMLTextAreaElement>(".composer-input")
@@ -1652,6 +1995,7 @@ export default function App(): ReactNode {
         <header className="topbar">
           <Breadcrumb
             view={view}
+            currentSpaceName={currentSpaceName}
             thread={thread}
             query={query}
             activeTag={activeTag}
@@ -1678,6 +2022,7 @@ export default function App(): ReactNode {
         <div className="canvas">
           {view.kind === "root" ? (
             <RootView
+              activeSpaceId={currentSpaceId ?? ""}
               roots={filteredRoots}
               loading={loading}
               error={error}
@@ -1708,6 +2053,82 @@ export default function App(): ReactNode {
           )}
         </div>
       </main>
+      {spaceModal && (
+        <div
+          className="dialog-backdrop"
+          role="presentation"
+          onClick={() => closeSpaceModal()}
+        >
+          <section
+            className="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="space-action-dialog-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="space-action-dialog-title" className="dialog-title">
+              {spaceModal.kind === "new"
+                ? "Create space"
+                : spaceModal.kind === "rename"
+                  ? "Rename space"
+                  : "Delete space?"}
+            </h3>
+            {spaceModal.kind === "delete" ? (
+              <p className="dialog-body">
+                This will delete "{modalTargetSpace?.name ?? "this space"}" and all threads in it.
+              </p>
+            ) : (
+              <div className="dialog-form">
+                <label className="dialog-label" htmlFor="space-name-input">
+                  Space name
+                </label>
+                <input
+                  id="space-name-input"
+                  className="dialog-input"
+                  value={spaceNameDraft}
+                  onChange={(e) => setSpaceNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void submitSpaceModal();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      closeSpaceModal();
+                    }
+                  }}
+                  disabled={spaceModalBusy}
+                  autoFocus
+                />
+              </div>
+            )}
+            {spaceModalError && <p className="composer-error">{spaceModalError}</p>}
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={closeSpaceModal}
+                disabled={spaceModalBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={`btn ${spaceModal.kind === "delete" ? "btn-danger" : "btn-primary"}`}
+                onClick={() => void submitSpaceModal()}
+                disabled={spaceModalBusy}
+              >
+                {spaceModalBusy
+                  ? "Saving…"
+                  : spaceModal.kind === "new"
+                    ? "Create"
+                    : spaceModal.kind === "rename"
+                      ? "Save"
+                      : "Delete"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

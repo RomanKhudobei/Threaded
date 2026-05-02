@@ -11,6 +11,7 @@ Endpoints:
 from __future__ import annotations
 
 import os
+import sqlite3
 from pathlib import Path
 from typing import Optional
 
@@ -18,7 +19,7 @@ from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .store import Note, NoteStore
+from .store import DEFAULT_SPACE_ID, Note, NoteStore, Space
 
 DATABASE_PATH = Path(
     os.environ.get(
@@ -51,6 +52,7 @@ async def _close_store() -> None:
 
 class NoteOut(BaseModel):
     id: str
+    spaceId: str
     parentId: Optional[str]
     text: str
     createdAt: str
@@ -60,6 +62,7 @@ class NoteOut(BaseModel):
     def from_note(cls, note: Note) -> "NoteOut":
         return cls(
             id=note.id,
+            spaceId=note.spaceId,
             parentId=note.parentId,
             text=note.text,
             createdAt=note.createdAt,
@@ -69,11 +72,34 @@ class NoteOut(BaseModel):
 
 class CreateNoteIn(BaseModel):
     text: str = Field(..., min_length=1, max_length=10_000)
+    spaceId: str = Field(..., min_length=1, max_length=255)
     parentId: Optional[str] = None
 
 
 class UpdateNoteIn(BaseModel):
     text: str = Field(..., min_length=1, max_length=10_000)
+
+
+class SpaceOut(BaseModel):
+    id: str
+    name: str
+    createdAt: str
+
+    @classmethod
+    def from_space(cls, space: Space) -> "SpaceOut":
+        return cls(
+            id=space.id,
+            name=space.name,
+            createdAt=space.createdAt,
+        )
+
+
+class CreateSpaceIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+
+
+class UpdateSpaceIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
 
 
 class ThreadView(BaseModel):
@@ -93,32 +119,104 @@ def _normalize_parent_id(parent_id: Optional[str]) -> Optional[str]:
     return cleaned
 
 
+def _normalize_space_id(space_id: str) -> str:
+    cleaned = space_id.strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="spaceId is required")
+    return cleaned
+
+
+def _normalize_space_name(name: str) -> str:
+    cleaned = " ".join(name.split()).strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Space name cannot be empty")
+    return cleaned
+
+
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/spaces", response_model=list[SpaceOut])
+async def list_spaces() -> list[SpaceOut]:
+    spaces = await store.list_spaces()
+    return [SpaceOut.from_space(space) for space in spaces]
+
+
+@app.post("/api/spaces", response_model=SpaceOut, status_code=201)
+async def create_space(payload: CreateSpaceIn) -> SpaceOut:
+    name = _normalize_space_name(payload.name)
+    try:
+        space = await store.create_space(name)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Space name already exists")
+    return SpaceOut.from_space(space)
+
+
+@app.patch("/api/spaces/{space_id}", response_model=SpaceOut)
+async def update_space(space_id: str, payload: UpdateSpaceIn) -> SpaceOut:
+    name = _normalize_space_name(payload.name)
+    try:
+        space = await store.update_space_name(space_id=space_id, name=name)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Space name already exists")
+    if space is None:
+        raise HTTPException(status_code=404, detail="Space not found")
+    return SpaceOut.from_space(space)
+
+
+@app.delete("/api/spaces/{space_id}", status_code=204, response_class=Response)
+async def delete_space(space_id: str) -> Response:
+    spaces = await store.list_spaces()
+    if len(spaces) <= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one space must remain",
+        )
+    if space_id == DEFAULT_SPACE_ID and len(spaces) > 1:
+        # Keep default space stable for legacy links and startup backfills.
+        raise HTTPException(
+            status_code=400,
+            detail="Default space cannot be deleted",
+        )
+    deleted = await store.delete_space(space_id=space_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Space not found")
+    return Response(status_code=204)
+
+
 @app.get("/api/notes", response_model=list[NoteOut])
-async def list_notes(parentId: Optional[str] = Query(default=None)) -> list[NoteOut]:
+async def list_notes(
+    spaceId: str = Query(..., min_length=1),
+    parentId: Optional[str] = Query(default=None),
+) -> list[NoteOut]:
+    space = _normalize_space_id(spaceId)
+    if await store.get_space(space) is None:
+        raise HTTPException(status_code=404, detail="Space not found")
     parent = _normalize_parent_id(parentId)
     if parent is not None:
-        if await store.get(parent) is None:
+        if await store.get(parent, space_id=space) is None:
             raise HTTPException(status_code=404, detail="Parent note not found")
-    children = await store.list_children(parent)
+    children = await store.list_children(space, parent)
     return [NoteOut.from_note(n) for n in children]
 
 
 @app.get("/api/notes/{note_id}/thread", response_model=ThreadView)
 async def get_thread(
     note_id: str,
+    spaceId: str = Query(..., min_length=1),
     ancestorLimit: int = Query(default=ANCESTOR_PAGE_SIZE, ge=1, le=50),
 ) -> ThreadView:
-    note = await store.get(note_id)
+    space = _normalize_space_id(spaceId)
+    if await store.get_space(space) is None:
+        raise HTTPException(status_code=404, detail="Space not found")
+    note = await store.get(note_id, space_id=space)
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    children = await store.list_children(note.id)
-    full_chain = await store.ancestors(note.id)
+    children = await store.list_children(space, note.id)
+    full_chain = await store.ancestors(note.id, space)
     total = len(full_chain)
     visible = full_chain[-ancestorLimit:] if ancestorLimit < total else full_chain
     has_more = total > len(visible)
@@ -137,28 +235,41 @@ async def create_note(payload: CreateNoteIn) -> NoteOut:
     text = payload.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text cannot be empty")
+    space = _normalize_space_id(payload.spaceId)
+    if await store.get_space(space) is None:
+        raise HTTPException(status_code=404, detail="Space not found")
     parent_id = _normalize_parent_id(payload.parentId)
     try:
-        note = await store.create(text=text, parent_id=parent_id)
+        note = await store.create(text=text, parent_id=parent_id, space_id=space)
     except KeyError:
         raise HTTPException(status_code=404, detail="Parent note not found")
     return NoteOut.from_note(note)
 
 
 @app.patch("/api/notes/{note_id}", response_model=NoteOut)
-async def update_note(note_id: str, payload: UpdateNoteIn) -> NoteOut:
+async def update_note(
+    note_id: str, payload: UpdateNoteIn, spaceId: str = Query(..., min_length=1)
+) -> NoteOut:
     text = payload.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text cannot be empty")
-    note = await store.update_text(note_id=note_id, text=text)
+    space = _normalize_space_id(spaceId)
+    if await store.get_space(space) is None:
+        raise HTTPException(status_code=404, detail="Space not found")
+    note = await store.update_text(note_id=note_id, text=text, space_id=space)
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
     return NoteOut.from_note(note)
 
 
 @app.delete("/api/notes/{note_id}", status_code=204, response_class=Response)
-async def delete_note(note_id: str) -> Response:
-    deleted = await store.delete(note_id=note_id)
+async def delete_note(
+    note_id: str, spaceId: str = Query(..., min_length=1)
+) -> Response:
+    space = _normalize_space_id(spaceId)
+    if await store.get_space(space) is None:
+        raise HTTPException(status_code=404, detail="Space not found")
+    deleted = await store.delete(note_id=note_id, space_id=space)
     if not deleted:
         raise HTTPException(status_code=404, detail="Note not found")
     return Response(status_code=204)
