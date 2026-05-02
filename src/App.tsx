@@ -434,6 +434,11 @@ function ThoughtCard({
   }, [note.text, isEditing]);
 
   useEffect(() => {
+    if (!isEditing) return;
+    setIsActionsMenuOpen(false);
+  }, [isEditing]);
+
+  useEffect(() => {
     if (!isActionsMenuOpen) return;
     const onPointerDown = (event: PointerEvent) => {
       if (actionsMenuRef.current?.contains(event.target as Node)) return;
@@ -579,42 +584,38 @@ function ThoughtCard({
             </span>
           )}
           <span className="thought-spacer" />
-          <div
-            className={`thought-actions ${isActionsMenuOpen ? "is-open" : ""}`}
-            ref={actionsMenuRef}
-          >
-            <button
-              type="button"
-              className={`meta-btn meta-btn--icon meta-more-btn ${isActionsMenuOpen ? "is-active" : ""}`}
-              onClick={() => setIsActionsMenuOpen((prev) => !prev)}
-              aria-label="Open thought menu"
-              aria-expanded={isActionsMenuOpen}
-              aria-haspopup="menu"
-              title="More"
-            >
-              <Icons.More />
-            </button>
+          {!isEditing && (
             <div
-              className={`thought-context-menu ${isActionsMenuOpen ? "is-open" : ""}`}
-              role="menu"
+              className={`thought-actions ${isActionsMenuOpen ? "is-open" : ""}`}
+              ref={actionsMenuRef}
             >
               <button
                 type="button"
-                className="thought-context-item"
-                onClick={() => {
-                  if (isEditing) {
-                    cancelEdit();
-                  } else {
-                    openEditor();
-                  }
-                }}
-                role="menuitem"
-                disabled={savingEdit}
+                className={`meta-btn meta-btn--icon meta-more-btn ${isActionsMenuOpen ? "is-active" : ""}`}
+                onClick={() => setIsActionsMenuOpen((prev) => !prev)}
+                aria-label="Open thought menu"
+                aria-expanded={isActionsMenuOpen}
+                aria-haspopup="menu"
+                title="More"
               >
-                {isEditing ? "Close editor" : "Edit"}
+                <Icons.More />
               </button>
+              <div
+                className={`thought-context-menu ${isActionsMenuOpen ? "is-open" : ""}`}
+                role="menu"
+              >
+                <button
+                  type="button"
+                  className="thought-context-item"
+                  onClick={openEditor}
+                  role="menuitem"
+                  disabled={savingEdit}
+                >
+                  Edit
+                </button>
+              </div>
             </div>
-          </div>
+          )}
           <button
             type="button"
             className={`meta-btn ${replying ? "is-active" : ""}`}
