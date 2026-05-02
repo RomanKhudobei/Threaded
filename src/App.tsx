@@ -299,6 +299,7 @@ type ComposerProps = {
   placeholder: string;
   ctaLabel?: string;
   variant?: "primary" | "inline";
+  singleLine?: boolean;
   autoFocus?: boolean;
   onCancel?: () => void;
   onCreated: (note: Note) => void;
@@ -309,6 +310,7 @@ function Composer({
   placeholder,
   ctaLabel = "Add thought",
   variant = "primary",
+  singleLine = false,
   autoFocus,
   onCancel,
   onCreated,
@@ -355,7 +357,10 @@ function Composer({
   const compact = variant === "inline";
 
   return (
-    <form className={`composer ${compact ? "is-compact" : ""}`} onSubmit={submit}>
+    <form
+      className={`composer ${compact ? "is-compact" : ""} ${singleLine && !compact ? "is-single-line" : ""}`}
+      onSubmit={submit}
+    >
       <textarea
         ref={ref}
         className="composer-input"
@@ -363,7 +368,7 @@ function Composer({
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
-        rows={compact ? 2 : 4}
+        rows={compact ? 2 : singleLine ? 1 : 4}
         disabled={submitting}
       />
       <div className="composer-row">
@@ -974,6 +979,7 @@ type RootViewProps = {
   error: string | null;
   query: string;
   activeTag: string | null;
+  headerCompact: boolean;
   onCreated: (note: Note) => void;
   onUpdated: (noteId: string, text: string) => Promise<void>;
   onDeleted: (note: Note) => Promise<void>;
@@ -988,6 +994,7 @@ function RootView({
   error,
   query,
   activeTag,
+  headerCompact,
   onCreated,
   onUpdated,
   onDeleted,
@@ -1017,18 +1024,21 @@ function RootView({
 
   return (
     <>
-      <section className="hero">
-        <Wordmark />
-        <p className="hero-sub">A quiet place to go deep.</p>
-      </section>
+      <section className="root-header">
+        <section className="hero">
+          <Wordmark />
+          <p className="hero-sub">A quiet place to go deep.</p>
+        </section>
 
-      <section className="composer-wrap">
-        <Composer
-          parentId={null}
-          placeholder="What's on your mind?"
-          ctaLabel="Add thought"
-          onCreated={onCreated}
-        />
+        <section className="composer-wrap">
+          <Composer
+            parentId={null}
+            placeholder="What's on your mind?"
+            ctaLabel="Add thought"
+            singleLine={headerCompact}
+            onCreated={onCreated}
+          />
+        </section>
       </section>
 
       {error && <div className="banner banner-error">{error}</div>}
@@ -1267,11 +1277,31 @@ export default function App(): ReactNode {
     if (stored === "light") return false;
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
   });
+  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     window.localStorage.setItem("threaded-theme", dark ? "dark" : "light");
   }, [dark]);
+
+  useEffect(() => {
+    let rafId = 0;
+    const updateHeaderState = () => {
+      const compact = window.scrollY > 42;
+      setIsHeaderCompact((prev) => (prev === compact ? prev : compact));
+      rafId = 0;
+    };
+    const onScroll = () => {
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(updateHeaderState);
+    };
+    updateHeaderState();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
+  }, []);
 
   useEffect(() => {
     const targetPath = pathFromView(view);
@@ -1567,7 +1597,7 @@ export default function App(): ReactNode {
         }}
       />
 
-      <main className="main">
+      <main className={`main ${view.kind === "root" && isHeaderCompact ? "is-header-compact" : ""}`}>
         <header className="topbar">
           <Breadcrumb
             view={view}
@@ -1602,6 +1632,7 @@ export default function App(): ReactNode {
               error={error}
               query={query}
               activeTag={activeTag}
+              headerCompact={isHeaderCompact}
               onCreated={handleCreated}
               onUpdated={handleUpdated}
               onDeleted={handleDeleted}
