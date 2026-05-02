@@ -827,6 +827,17 @@ function Sidebar({
     };
   }, [items.length]);
 
+  useLayoutEffect(() => {
+    if (!currentThreadId) return;
+    const list = listRef.current;
+    if (!list) return;
+    const activeItem = list.querySelector<HTMLButtonElement>(
+      ".thread-item.is-active",
+    );
+    if (!activeItem) return;
+    activeItem.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [currentThreadId, items]);
+
   return (
     <aside className="sidebar" ref={wrapRef}>
       <div className="sidebar-brand">
