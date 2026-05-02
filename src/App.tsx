@@ -53,6 +53,10 @@ function pathFromView(view: View): string {
   return "/";
 }
 
+function viewKey(view: View): string {
+  return pathFromView(view);
+}
+
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -1270,6 +1274,8 @@ export default function App(): ReactNode {
     null,
   );
   const didSyncRouteRef = useRef(false);
+  const scrollPositionsRef = useRef<Map<string, number>>(new Map());
+  const pendingScrollRestoreRef = useRef<number | null>(null);
   const [dark, setDark] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     const stored = window.localStorage.getItem("threaded-theme");
@@ -1317,12 +1323,43 @@ export default function App(): ReactNode {
 
   useEffect(() => {
     const onPopState = () => {
+      const nextView = viewFromPath(window.location.pathname);
+      scrollPositionsRef.current.set(viewKey(view), window.scrollY);
+      pendingScrollRestoreRef.current =
+        scrollPositionsRef.current.get(viewKey(nextView)) ?? 0;
       setActiveReplyComposerId(null);
-      setView(viewFromPath(window.location.pathname));
+      setView(nextView);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [view]);
+
+  useLayoutEffect(() => {
+    if (pendingScrollRestoreRef.current === null) return;
+    if (loading) return;
+    const readyForRestore =
+      view.kind === "root" ||
+      thread?.note.id === view.noteId ||
+      (view.kind === "thread" && !!error);
+    if (!readyForRestore) return;
+
+    const scrollTop = pendingScrollRestoreRef.current;
+    pendingScrollRestoreRef.current = null;
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollTop, behavior: "auto" });
+    });
+  }, [view, loading, thread, error]);
+
+  const navigateToView = useCallback(
+    (nextView: View) => {
+      scrollPositionsRef.current.set(viewKey(view), window.scrollY);
+      pendingScrollRestoreRef.current =
+        scrollPositionsRef.current.get(viewKey(nextView)) ?? 0;
+      setActiveReplyComposerId(null);
+      setView(nextView);
+    },
+    [view],
+  );
 
   const refreshRoots = useCallback(async () => {
     setLoading(true);
@@ -1425,16 +1462,16 @@ export default function App(): ReactNode {
     [view, refreshRoots, refreshThread],
   );
 
-  const handleOpenThread = useCallback((id: string) => {
-    setActiveReplyComposerId(null);
-    setView({ kind: "thread", noteId: id });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+  const handleOpenThread = useCallback(
+    (id: string) => {
+      navigateToView({ kind: "thread", noteId: id });
+    },
+    [navigateToView],
+  );
 
   const handleBack = useCallback(() => {
-    setActiveReplyComposerId(null);
-    setView({ kind: "root" });
-  }, []);
+    navigateToView({ kind: "root" });
+  }, [navigateToView]);
 
   const handleGoUpLevel = useCallback(() => {
     const parentId = thread?.note.parentId;
@@ -1501,20 +1538,18 @@ export default function App(): ReactNode {
         view.kind === "thread" && !!thread?.ancestors.some((candidate) => candidate.id === note.id);
 
       if (deletedFocused) {
-        setActiveReplyComposerId(null);
         if (note.parentId) {
-          setView({ kind: "thread", noteId: note.parentId });
+          navigateToView({ kind: "thread", noteId: note.parentId });
           void refreshThread(note.parentId);
         } else {
-          setView({ kind: "root" });
+          navigateToView({ kind: "root" });
           void refreshRoots();
         }
         return;
       }
 
       if (deletedAncestor) {
-        setActiveReplyComposerId(null);
-        setView({ kind: "root" });
+        navigateToView({ kind: "root" });
         void refreshRoots();
         return;
       }
@@ -1525,7 +1560,7 @@ export default function App(): ReactNode {
         void refreshThread(view.noteId);
       }
     },
-    [view, thread, refreshRoots, refreshThread],
+    [view, thread, navigateToView, refreshRoots, refreshThread],
   );
 
   // ⌘K focuses search.
@@ -1574,21 +1609,18 @@ export default function App(): ReactNode {
         currentThreadId={currentThreadId}
         query={query}
         onQueryChange={(q) => {
-          setActiveReplyComposerId(null);
           setQuery(q);
-          setView({ kind: "root" });
+          navigateToView({ kind: "root" });
         }}
         activeTag={activeTag}
         onTagClick={(t) => {
-          setActiveReplyComposerId(null);
           setActiveTag((prev) => (prev === t ? null : t));
-          setView({ kind: "root" });
+          navigateToView({ kind: "root" });
         }}
         tags={tags}
         onSelect={handleOpenThread}
         onNew={() => {
-          setActiveReplyComposerId(null);
-          setView({ kind: "root" });
+          navigateToView({ kind: "root" });
           window.setTimeout(() => {
             document
               .querySelector<HTMLTextAreaElement>(".composer-input")
