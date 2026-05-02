@@ -143,10 +143,12 @@ if data ever gets corrupted into a cycle.
 - [ ] Make composer sticky at the top
 - [ ] Add sort/filter on main canvas (somewhere near composer). It should stay on each thread. Add
 list of popular tags with counts
-- [ ] Add grouping by date for better visibility and structure
+- [x] Add grouping by date for better visibility and structure
 - [ ] Add auth with Google/Apple
 - [ ] Deploy
 - [ ] Add colors?
 - [x] Implement tree-like navigation for thoughts (or in sidebar display adjacent cards, instead of roots)
 - [ ] Add thought spaces
 - [ ] Add reactions and filter by reaction
+- [ ] Add buy me a coffee link
+- [ ] Додати маркери, виділення тексту, text editor 

@@ -81,6 +81,11 @@ const api = {
       method: "POST",
       body: JSON.stringify({ text, parentId }),
     }),
+  updateNote: (id: string, text: string) =>
+    http<Note>(`/notes/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ text }),
+    }),
 };
 
 function sortByNewest(notes: Note[]): Note[] {
@@ -384,6 +389,7 @@ type ThoughtCardProps = {
   showRepliesChip?: boolean;
   onOpenThread: (noteId: string) => void;
   onCreated: (note: Note) => void;
+  onUpdated: (noteId: string, text: string) => Promise<void>;
   activeReplyComposerId: string | null;
   onReplyComposerChange: (noteId: string | null) => void;
   isFocused?: boolean;
@@ -398,6 +404,7 @@ function ThoughtCard({
   showRepliesChip = true,
   onOpenThread,
   onCreated,
+  onUpdated,
   activeReplyComposerId,
   onReplyComposerChange,
   isFocused,
@@ -405,6 +412,10 @@ function ThoughtCard({
   const childrenWrapRef = useRef<HTMLDivElement | null>(null);
   const childrenListRef = useRef<HTMLDivElement | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftText, setDraftText] = useState(note.text);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const replying = activeReplyComposerId === note.id;
   const tags = useMemo(() => extractTags(note.text), [note.text]);
   const displayText = useMemo(
@@ -439,12 +450,99 @@ function ThoughtCard({
     setIsExpanded(false);
   }, [canShowChildren]);
 
+  useEffect(() => {
+    if (!isEditing) {
+      setDraftText(note.text);
+      setEditError(null);
+    }
+  }, [note.text, isEditing]);
+
+  const cancelEdit = useCallback(() => {
+    if (savingEdit) return;
+    setIsEditing(false);
+    setDraftText(note.text);
+    setEditError(null);
+  }, [savingEdit, note.text]);
+
+  const submitEdit = useCallback(async () => {
+    const trimmed = draftText.trim();
+    if (!trimmed) return;
+    if (trimmed === note.text) {
+      setIsEditing(false);
+      setEditError(null);
+      return;
+    }
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      await onUpdated(note.id, trimmed);
+      setIsEditing(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Could not save note");
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [draftText, note.id, note.text, onUpdated]);
+
+  const onEditKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      void submitEdit();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancelEdit();
+    }
+  };
+
   return (
     <div
       className={`thought ${isFocused ? "is-focused" : ""} ${isChildCard ? "is-child" : ""}`.trim()}
     >
       <article className="thought-card">
-        <p className="thought-body">{displayText}</p>
+        {isEditing ? (
+          <div className="thought-edit-wrap">
+            <textarea
+              className="thought-edit-input"
+              value={draftText}
+              onChange={(e) => setDraftText(e.target.value)}
+              onKeyDown={onEditKeyDown}
+              rows={3}
+              disabled={savingEdit}
+              autoFocus
+            />
+            <div className="thought-edit-row">
+              {editError ? (
+                <span className="composer-error">{editError}</span>
+              ) : (
+                <span className="composer-hint">
+                  <kbd>⌘</kbd>
+                  <kbd>↵</kbd>
+                  <span className="composer-hint-text">to save</span>
+                </span>
+              )}
+              <div className="composer-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={cancelEdit}
+                  disabled={savingEdit}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => void submitEdit()}
+                  disabled={savingEdit || !draftText.trim()}
+                >
+                  {savingEdit ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="thought-body">{displayText}</p>
+        )}
         <div className="thought-meta">
           {timestampStyle !== "hidden" && (
             <time className="ts" dateTime={note.createdAt}>
@@ -486,10 +584,35 @@ function ThoughtCard({
           )}
           <button
             type="button"
+            className={`meta-btn ${isEditing ? "is-active" : ""}`}
+            onClick={() => {
+              if (isEditing) {
+                cancelEdit();
+                return;
+              }
+              onReplyComposerChange(null);
+              setIsEditing(true);
+              setDraftText(note.text);
+              setEditError(null);
+            }}
+            aria-label={isEditing ? "Close editor" : "Edit thought"}
+            title={isEditing ? "Close editor" : "Edit thought"}
+            disabled={savingEdit}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
             className={`meta-btn ${replying ? "is-active" : ""}`}
-            onClick={() => onReplyComposerChange(replying ? null : note.id)}
+            onClick={() => {
+              if (isEditing) {
+                cancelEdit();
+              }
+              onReplyComposerChange(replying ? null : note.id);
+            }}
             aria-label={replying ? "Close reply composer" : "Write a reply"}
             title={replying ? "Close reply composer" : "Write a reply"}
+            disabled={savingEdit}
           >
             <Icons.Reply />
           </button>
@@ -507,6 +630,7 @@ function ThoughtCard({
                 timestampStyle={timestampStyle}
                 onOpenThread={onOpenThread}
                 onCreated={onCreated}
+                onUpdated={onUpdated}
                 activeReplyComposerId={activeReplyComposerId}
                 onReplyComposerChange={onReplyComposerChange}
               />
@@ -742,6 +866,7 @@ type RootViewProps = {
   query: string;
   activeTag: string | null;
   onCreated: (note: Note) => void;
+  onUpdated: (noteId: string, text: string) => Promise<void>;
   onOpenThread: (id: string) => void;
   activeReplyComposerId: string | null;
   onReplyComposerChange: (noteId: string | null) => void;
@@ -754,6 +879,7 @@ function RootView({
   query,
   activeTag,
   onCreated,
+  onUpdated,
   onOpenThread,
   activeReplyComposerId,
   onReplyComposerChange,
@@ -850,6 +976,7 @@ function RootView({
                       timestampStyle="time-only"
                       onOpenThread={onOpenThread}
                       onCreated={onCreated}
+                      onUpdated={onUpdated}
                       activeReplyComposerId={activeReplyComposerId}
                       onReplyComposerChange={onReplyComposerChange}
                     />
@@ -871,6 +998,7 @@ type ThreadPageProps = {
   error: string | null;
   onGoUpLevel: () => void;
   onCreated: (note: Note) => void;
+  onUpdated: (noteId: string, text: string) => Promise<void>;
   onOpenThread: (id: string) => void;
   activeReplyComposerId: string | null;
   onReplyComposerChange: (noteId: string | null) => void;
@@ -882,6 +1010,7 @@ function ThreadPage({
   error,
   onGoUpLevel,
   onCreated,
+  onUpdated,
   onOpenThread,
   activeReplyComposerId,
   onReplyComposerChange,
@@ -965,6 +1094,7 @@ function ThreadPage({
             showRepliesChip={false}
             onOpenThread={onOpenThread}
             onCreated={onCreated}
+            onUpdated={onUpdated}
             activeReplyComposerId={activeReplyComposerId}
             onReplyComposerChange={onReplyComposerChange}
             isFocused
@@ -980,6 +1110,7 @@ function ThreadPage({
                       canExpand
                       onOpenThread={onOpenThread}
                       onCreated={onCreated}
+                      onUpdated={onUpdated}
                       activeReplyComposerId={activeReplyComposerId}
                       onReplyComposerChange={onReplyComposerChange}
                     />
@@ -1247,6 +1378,42 @@ export default function App(): ReactNode {
     handleBack();
   }, [thread, handleOpenThread, handleBack]);
 
+  const handleUpdated = useCallback(
+    async (noteId: string, text: string) => {
+      try {
+        const updated = await api.updateNote(noteId, text);
+        setError(null);
+
+        setRoots((prev) =>
+          prev.map((note) => (note.id === updated.id ? { ...note, text: updated.text } : note)),
+        );
+        setSidebarThreads((prev) =>
+          prev.map((note) => (note.id === updated.id ? { ...note, text: updated.text } : note)),
+        );
+        setThread((prev) => {
+          if (!prev) return prev;
+          const patch = (note: Note): Note =>
+            note.id === updated.id ? { ...note, text: updated.text } : note;
+          return {
+            ...prev,
+            note: patch(prev.note),
+            ancestors: prev.ancestors.map(patch),
+            children: prev.children.map(patch),
+          };
+        });
+
+        // Keep expanded descendants in sync when they are not in local thread state.
+        if (view.kind === "root") void refreshRoots();
+        else void refreshThread(view.noteId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not update note";
+        setError(message);
+        throw err;
+      }
+    },
+    [view, refreshRoots, refreshThread],
+  );
+
   // ⌘K focuses search.
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -1352,6 +1519,7 @@ export default function App(): ReactNode {
               query={query}
               activeTag={activeTag}
               onCreated={handleCreated}
+              onUpdated={handleUpdated}
               onOpenThread={handleOpenThread}
               activeReplyComposerId={activeReplyComposerId}
               onReplyComposerChange={setActiveReplyComposerId}
@@ -1363,6 +1531,7 @@ export default function App(): ReactNode {
               error={error}
               onGoUpLevel={handleGoUpLevel}
               onCreated={handleCreated}
+              onUpdated={handleUpdated}
               onOpenThread={handleOpenThread}
               activeReplyComposerId={activeReplyComposerId}
               onReplyComposerChange={setActiveReplyComposerId}

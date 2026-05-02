@@ -665,6 +665,33 @@ kbd {
   white-space: pre-wrap;
   word-wrap: break-word;
 }
+.thought-edit-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.thought-edit-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  resize: vertical;
+  min-height: 70px;
+  line-height: 1.5;
+  outline: none;
+}
+.thought-edit-input:focus {
+  border-color: var(--text-3);
+  box-shadow: var(--shadow-sm);
+}
+.thought-edit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .thought-meta {
   display: flex;
   align-items: center;
@@ -704,7 +731,7 @@ kbd {
   justify-content: center;
   gap: 6px;
   min-height: 20px;
-  padding: 6px 10px;
+  padding: 3px 7px;
   border-radius: 999px;
   line-height: 1;
   transition: all 140ms;

@@ -4,6 +4,7 @@ Endpoints:
 - GET /api/notes?parentId=...    list root notes or direct children
 - GET /api/notes/{id}/thread     focused note with children + ancestor path
 - POST /api/notes                create root or child note
+- PATCH /api/notes/{id}          update note text
 """
 
 from __future__ import annotations
@@ -68,6 +69,10 @@ class NoteOut(BaseModel):
 class CreateNoteIn(BaseModel):
     text: str = Field(..., min_length=1, max_length=10_000)
     parentId: Optional[str] = None
+
+
+class UpdateNoteIn(BaseModel):
+    text: str = Field(..., min_length=1, max_length=10_000)
 
 
 class ThreadView(BaseModel):
@@ -136,4 +141,15 @@ async def create_note(payload: CreateNoteIn) -> NoteOut:
         note = await store.create(text=text, parent_id=parent_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Parent note not found")
+    return NoteOut.from_note(note)
+
+
+@app.patch("/api/notes/{note_id}", response_model=NoteOut)
+async def update_note(note_id: str, payload: UpdateNoteIn) -> NoteOut:
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+    note = await store.update_text(note_id=note_id, text=text)
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
     return NoteOut.from_note(note)
