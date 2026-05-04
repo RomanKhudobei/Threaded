@@ -2,6 +2,7 @@
 
 Endpoints:
 - GET /api/notes?parentId=...    list root notes or direct children
+- GET /api/notes/search          search notes by text within a space
 - GET /api/notes/{id}/thread     focused note with children + ancestor path
 - POST /api/notes                create root or child note
 - PATCH /api/notes/{id}          update note text
@@ -200,6 +201,21 @@ async def list_notes(
             raise HTTPException(status_code=404, detail="Parent note not found")
     children = await store.list_children(space, parent)
     return [NoteOut.from_note(n) for n in children]
+
+
+@app.get("/api/notes/search", response_model=list[NoteOut])
+async def search_notes(
+    spaceId: str = Query(..., min_length=1),
+    query: str = Query(..., min_length=1, max_length=500),
+) -> list[NoteOut]:
+    space = _normalize_space_id(spaceId)
+    if await store.get_space(space) is None:
+        raise HTTPException(status_code=404, detail="Space not found")
+    text_query = " ".join(query.split()).strip()
+    if not text_query:
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+    matches = await store.search_notes(space_id=space, query=text_query)
+    return [NoteOut.from_note(note) for note in matches]
 
 
 @app.get("/api/notes/{note_id}/thread", response_model=ThreadView)

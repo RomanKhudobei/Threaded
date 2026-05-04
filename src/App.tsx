@@ -133,6 +133,10 @@ const api = {
   },
   listRoots: (spaceId: string) =>
     http<Note[]>(`/notes?spaceId=${encodeURIComponent(spaceId)}`),
+  searchNotes: (spaceId: string, query: string) =>
+    http<Note[]>(
+      `/notes/search?spaceId=${encodeURIComponent(spaceId)}&query=${encodeURIComponent(query)}`,
+    ),
   listByParent: (spaceId: string, parentId: string) =>
     http<Note[]>(
       `/notes?spaceId=${encodeURIComponent(spaceId)}&parentId=${encodeURIComponent(parentId)}`,
@@ -1481,6 +1485,7 @@ export default function App(): ReactNode {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [activeReplyComposerId, setActiveReplyComposerId] = useState<string | null>(
     null,
@@ -1490,6 +1495,7 @@ export default function App(): ReactNode {
   const [spaceModalBusy, setSpaceModalBusy] = useState(false);
   const [spaceModalError, setSpaceModalError] = useState<string | null>(null);
   const didSyncRouteRef = useRef(false);
+  const rootsRequestSeqRef = useRef(0);
   const scrollPositionsRef = useRef<Map<string, number>>(new Map());
   const pendingScrollRestoreRef = useRef<number | null>(null);
   const [dark, setDark] = useState<boolean>(() => {
@@ -1523,6 +1529,13 @@ export default function App(): ReactNode {
   useEffect(() => {
     void refreshSpaces();
   }, [refreshSpaces]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedQuery(query);
+    }, 250);
+    return () => window.clearTimeout(timeoutId);
+  }, [query]);
 
   useEffect(() => {
     let rafId = 0;
@@ -1608,15 +1621,23 @@ export default function App(): ReactNode {
     [view],
   );
 
-  const refreshRoots = useCallback(async (spaceId: string) => {
+  const refreshRoots = useCallback(async (spaceId: string, textQuery: string) => {
+    const requestSeq = rootsRequestSeqRef.current + 1;
+    rootsRequestSeqRef.current = requestSeq;
     setLoading(true);
     setError(null);
     try {
-      const data = await api.listRoots(spaceId);
+      const trimmedQuery = textQuery.trim();
+      const data = trimmedQuery
+        ? await api.searchNotes(spaceId, trimmedQuery)
+        : await api.listRoots(spaceId);
+      if (requestSeq !== rootsRequestSeqRef.current) return;
       setRoots(sortByNewest(data));
     } catch (err) {
+      if (requestSeq !== rootsRequestSeqRef.current) return;
       setError(err instanceof Error ? err.message : "Could not load notes");
     } finally {
+      if (requestSeq !== rootsRequestSeqRef.current) return;
       setLoading(false);
     }
   }, []);
@@ -1638,11 +1659,11 @@ export default function App(): ReactNode {
   useEffect(() => {
     if (!currentSpaceId) return;
     if (view.kind === "root") {
-      void refreshRoots(currentSpaceId);
+      void refreshRoots(currentSpaceId, debouncedQuery);
     } else {
       void refreshThread(currentSpaceId, view.noteId);
     }
-  }, [view, currentSpaceId, refreshRoots, refreshThread]);
+  }, [view, currentSpaceId, debouncedQuery, refreshRoots, refreshThread]);
 
   useEffect(() => {
     if (!currentSpaceId) return;
@@ -1706,10 +1727,10 @@ export default function App(): ReactNode {
         return;
       }
       if (!currentSpaceId) return;
-      if (view.kind === "root") void refreshRoots(currentSpaceId);
+      if (view.kind === "root") void refreshRoots(currentSpaceId, debouncedQuery);
       else void refreshThread(currentSpaceId, view.noteId);
     },
-    [view, refreshRoots, refreshThread, currentSpaceId],
+    [view, debouncedQuery, refreshRoots, refreshThread, currentSpaceId],
   );
 
   const handleOpenThread = useCallback(
@@ -1760,7 +1781,7 @@ export default function App(): ReactNode {
         });
 
         // Keep expanded descendants in sync when they are not in local thread state.
-        if (view.kind === "root") void refreshRoots(currentSpaceId);
+        if (view.kind === "root") void refreshRoots(currentSpaceId, debouncedQuery);
         else void refreshThread(currentSpaceId, view.noteId);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not update note";
@@ -1768,7 +1789,7 @@ export default function App(): ReactNode {
         throw err;
       }
     },
-    [view, refreshRoots, refreshThread, currentSpaceId],
+    [view, debouncedQuery, refreshRoots, refreshThread, currentSpaceId],
   );
 
   const handleDeleted = useCallback(
@@ -1797,24 +1818,24 @@ export default function App(): ReactNode {
           void refreshThread(currentSpaceId, note.parentId);
         } else {
           navigateToView({ kind: "root", spaceId: currentSpaceId });
-          void refreshRoots(currentSpaceId);
+          void refreshRoots(currentSpaceId, debouncedQuery);
         }
         return;
       }
 
       if (deletedAncestor) {
         navigateToView({ kind: "root", spaceId: currentSpaceId });
-        void refreshRoots(currentSpaceId);
+        void refreshRoots(currentSpaceId, debouncedQuery);
         return;
       }
 
       if (view.kind === "root") {
-        void refreshRoots(currentSpaceId);
+        void refreshRoots(currentSpaceId, debouncedQuery);
       } else {
         void refreshThread(currentSpaceId, view.noteId);
       }
     },
-    [view, thread, navigateToView, refreshRoots, refreshThread, currentSpaceId],
+    [view, thread, debouncedQuery, navigateToView, refreshRoots, refreshThread, currentSpaceId],
   );
 
   const handleSelectSpace = useCallback(
@@ -1936,13 +1957,8 @@ export default function App(): ReactNode {
   }, [roots]);
 
   const filteredRoots = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return roots.filter((r) => {
-      const textHit = !q || r.text.toLowerCase().includes(q);
-      const tagHit = !activeTag || extractTags(r.text).includes(activeTag);
-      return textHit && tagHit;
-    });
-  }, [roots, query, activeTag]);
+    return roots.filter((r) => !activeTag || extractTags(r.text).includes(activeTag));
+  }, [roots, activeTag]);
 
   const currentThreadId = view.kind === "thread" ? view.noteId : null;
   if (spaces.length === 0) {

@@ -300,6 +300,25 @@ class NoteStore:
         await cursor.close()
         return [_row_to_note(row) for row in rows]
 
+    async def search_notes(self, space_id: str, query: str) -> list[Note]:
+        conn = await self._ensure_conn()
+        select_clause = (
+            "SELECT n.id, n.parent_id, n.text, n.created_at, "
+            "n.space_id, "
+            "(SELECT COUNT(*) FROM notes c WHERE c.parent_id = n.id AND c.space_id = n.space_id) AS child_count "
+            "FROM notes n"
+        )
+        normalized = query.strip().lower()
+        cursor = await conn.execute(
+            f"{select_clause} "
+            "WHERE n.space_id = ? AND LOWER(n.text) LIKE ? "
+            "ORDER BY n.created_at ASC",
+            (space_id, f"%{normalized}%"),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [_row_to_note(row) for row in rows]
+
     async def get(self, note_id: str, space_id: Optional[str] = None) -> Optional[Note]:
         conn = await self._ensure_conn()
         query = (
