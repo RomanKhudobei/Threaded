@@ -94,7 +94,7 @@ function viewKey(view: View): string {
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
@@ -191,7 +191,7 @@ const api = {
     parentId: string | null,
     tags: string[],
   ) =>
-    http<Note>("${API_BASE}/notes", {
+    http<Note>(`${API_BASE}/notes`, {
       method: "POST",
       body: JSON.stringify({ text, parentId, spaceId, tags: normalizeTags(tags) }),
     }),
