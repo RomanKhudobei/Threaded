@@ -487,6 +487,8 @@ class NoteStore:
         space_id: str,
         parent_id: Optional[str],
         tags: Optional[list[str]] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> list[Note]:
         conn = await self._ensure_conn()
         # Subquery yields the direct-child count per row so the UI can render
@@ -514,15 +516,24 @@ class NoteStore:
             )
             filter_params = [space_id, *normalized_tags, len(normalized_tags)]
 
+        date_clause = ""
+        date_params: list[str] = []
+        if date_from:
+            date_clause += "AND n.created_at >= ? "
+            date_params.append(f"{date_from}T00:00:00")
+        if date_to:
+            date_clause += "AND n.created_at <= ? "
+            date_params.append(f"{date_to}T23:59:59.999999")
+
         if parent_id is None:
             cursor = await conn.execute(
-                f"{select_clause} WHERE n.space_id = ? AND n.parent_id IS NULL {filter_clause}ORDER BY n.created_at ASC",
-                [space_id, *filter_params],
+                f"{select_clause} WHERE n.space_id = ? AND n.parent_id IS NULL {filter_clause}{date_clause}ORDER BY n.created_at ASC",
+                [space_id, *filter_params, *date_params],
             )
         else:
             cursor = await conn.execute(
-                f"{select_clause} WHERE n.space_id = ? AND n.parent_id = ? {filter_clause}ORDER BY n.created_at ASC",
-                [space_id, parent_id, *filter_params],
+                f"{select_clause} WHERE n.space_id = ? AND n.parent_id = ? {filter_clause}{date_clause}ORDER BY n.created_at ASC",
+                [space_id, parent_id, *filter_params, *date_params],
             )
         rows = await cursor.fetchall()
         await cursor.close()
@@ -530,7 +541,12 @@ class NoteStore:
         return await self._attach_tags_to_notes(conn, notes)
 
     async def search_notes(
-        self, space_id: str, query: str, tags: Optional[list[str]] = None
+        self,
+        space_id: str,
+        query: str,
+        tags: Optional[list[str]] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> list[Note]:
         conn = await self._ensure_conn()
         select_clause = (
@@ -556,12 +572,22 @@ class NoteStore:
                 ") "
             )
             filter_params = [space_id, *normalized_tags, len(normalized_tags)]
+
+        date_clause = ""
+        date_params: list[str] = []
+        if date_from:
+            date_clause += "AND n.created_at >= ? "
+            date_params.append(f"{date_from}T00:00:00")
+        if date_to:
+            date_clause += "AND n.created_at <= ? "
+            date_params.append(f"{date_to}T23:59:59.999999")
+
         cursor = await conn.execute(
             f"{select_clause} "
             "WHERE n.space_id = ? AND LOWER(n.text) LIKE ? "
-            f"{filter_clause}"
+            f"{filter_clause}{date_clause}"
             "ORDER BY n.created_at ASC",
-            [space_id, f"%{normalized}%", *filter_params],
+            [space_id, f"%{normalized}%", *filter_params, *date_params],
         )
         rows = await cursor.fetchall()
         await cursor.close()

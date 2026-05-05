@@ -243,6 +243,8 @@ async def list_notes(
     spaceId: str = Query(..., min_length=1),
     parentId: Optional[str] = Query(default=None),
     tag: list[str] = Query(default=[]),
+    dateFrom: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    dateTo: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
 ) -> list[NoteOut]:
     space = _normalize_space_id(spaceId)
     if await store.get_space(space) is None:
@@ -251,7 +253,7 @@ async def list_notes(
     if parent is not None:
         if await store.get(parent, space_id=space) is None:
             raise HTTPException(status_code=404, detail="Parent note not found")
-    children = await store.list_children(space, parent, tags=tag)
+    children = await store.list_children(space, parent, tags=tag, date_from=dateFrom, date_to=dateTo)
     return [NoteOut.from_note(n) for n in children]
 
 
@@ -260,6 +262,8 @@ async def search_notes(
     spaceId: str = Query(..., min_length=1),
     query: str = Query(..., min_length=1, max_length=500),
     tag: list[str] = Query(default=[]),
+    dateFrom: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    dateTo: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
 ) -> list[NoteOut]:
     space = _normalize_space_id(spaceId)
     if await store.get_space(space) is None:
@@ -267,7 +271,7 @@ async def search_notes(
     text_query = " ".join(query.split()).strip()
     if not text_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
-    matches = await store.search_notes(space_id=space, query=text_query, tags=tag)
+    matches = await store.search_notes(space_id=space, query=text_query, tags=tag, date_from=dateFrom, date_to=dateTo)
     return [NoteOut.from_note(note) for note in matches]
 
 

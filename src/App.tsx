@@ -12,6 +12,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { DayPicker, type DateRange as DPRange } from "react-day-picker";
+import "react-day-picker/style.css";
 
 type Note = {
   id: string;
@@ -47,6 +49,7 @@ type View =
   | { kind: "thread"; spaceId: string | null; noteId: string };
 
 type SidebarMode = "roots" | "siblings";
+type DateRange = { from: string; to: string }; // "YYYY-MM-DD"
 type SpaceModalState =
   | { kind: "new" }
   | { kind: "rename"; spaceId: string }
@@ -139,6 +142,16 @@ function buildTagsQuery(tags: string[]): string {
   return `&${params.toString()}`;
 }
 
+function buildDateRangeQuery(range: DateRange | null): string {
+  if (!range) return "";
+  return `&dateFrom=${range.from}&dateTo=${range.to}`;
+}
+
+function isNoteInDateRange(createdAt: string, range: DateRange): boolean {
+  const day = createdAt.slice(0, 10);
+  return day >= range.from && day <= range.to;
+}
+
 const api = {
   listSpaces: () => http<Space[]>(`${API_BASE}/spaces`),
   createSpace: (name: string) =>
@@ -167,13 +180,13 @@ const api = {
       throw new Error(detail || `Request failed (${res.status})`);
     }
   },
-  listRoots: (spaceId: string, tags: string[] = []) =>
+  listRoots: (spaceId: string, tags: string[] = [], range: DateRange | null = null) =>
     http<Note[]>(
-      `${API_BASE}/notes?spaceId=${encodeURIComponent(spaceId)}${buildTagsQuery(tags)}`,
+      `${API_BASE}/notes?spaceId=${encodeURIComponent(spaceId)}${buildTagsQuery(tags)}${buildDateRangeQuery(range)}`,
     ),
-  searchNotes: (spaceId: string, query: string, tags: string[] = []) =>
+  searchNotes: (spaceId: string, query: string, tags: string[] = [], range: DateRange | null = null) =>
     http<Note[]>(
-      `${API_BASE}/notes/search?spaceId=${encodeURIComponent(spaceId)}&query=${encodeURIComponent(query)}${buildTagsQuery(tags)}`,
+      `${API_BASE}/notes/search?spaceId=${encodeURIComponent(spaceId)}&query=${encodeURIComponent(query)}${buildTagsQuery(tags)}${buildDateRangeQuery(range)}`,
     ),
   listTags: (spaceId: string) =>
     http<TagStat[]>(`${API_BASE}/tags?spaceId=${encodeURIComponent(spaceId)}`),
@@ -350,6 +363,13 @@ const Icons = {
       <circle cx="3.5" cy="8" r="1" fill="currentColor" stroke="none" />
       <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
       <circle cx="12.5" cy="8" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  Calendar: () => (
+    <svg {...iconProps} aria-hidden="true">
+      <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
+      <path d="M2.5 7h11" />
+      <path d="M5.5 2v3M10.5 2v3" />
     </svg>
   ),
 };
@@ -554,6 +574,72 @@ function TagChipInput({
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function toDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function DateRangePicker({
+  value,
+  onChange,
+  onClose,
+}: {
+  value: DateRange | null;
+  onChange: (range: DateRange | null) => void;
+  onClose: () => void;
+}) {
+  const [pending, setPending] = useState<DPRange | undefined>(
+    value ? { from: new Date(value.from), to: new Date(value.to) } : undefined,
+  );
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleApply = () => {
+    if (pending?.from && pending?.to) {
+      onChange({ from: toDateStr(pending.from), to: toDateStr(pending.to) });
+    } else if (pending?.from) {
+      onChange({ from: toDateStr(pending.from), to: toDateStr(pending.from) });
+    }
+  };
+
+  const handleClear = () => {
+    setPending(undefined);
+    onChange(null);
+  };
+
+  return (
+    <div className="date-picker">
+      <DayPicker
+        mode="range"
+        selected={pending}
+        onSelect={setPending}
+        weekStartsOn={1}
+      />
+      <div className="date-picker-footer">
+        <button type="button" className="btn btn-ghost btn-xs" onClick={handleClear}>
+          Clear
+        </button>
+        <button
+          type="button"
+          className="btn btn-xs"
+          onClick={handleApply}
+          disabled={!pending?.from}
+        >
+          Apply
+        </button>
       </div>
     </div>
   );
@@ -1072,6 +1158,8 @@ type SidebarProps = {
   tags: TagStat[];
   onSelect: (id: string) => void;
   onNew: () => void;
+  dateRange: DateRange | null;
+  onDateRangeChange: (range: DateRange | null) => void;
 };
 
 function Sidebar({
@@ -1090,12 +1178,15 @@ function Sidebar({
   onTagClick,
   tags,
   onSelect,
-  onNew
+  onNew,
+  dateRange,
+  onDateRangeChange,
 }: SidebarProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const [isSpaceSelectOpen, setIsSpaceSelectOpen] = useState(false);
   const [isSpaceMenuOpen, setIsSpaceMenuOpen] = useState(false);
+  const [isCalOpen, setIsCalOpen] = useState(false);
   const currentSpace = spaces.find((space) => space.id === activeSpaceId) ?? spaces[0] ?? null;
 
   useLayoutEffect(() => {
@@ -1130,17 +1221,20 @@ function Sidebar({
   }, [currentThreadId, items]);
 
   useEffect(() => {
-    if (!isSpaceMenuOpen && !isSpaceSelectOpen) return;
+    if (!isSpaceMenuOpen && !isSpaceSelectOpen && !isCalOpen) return;
     const onPointerDown = (event: globalThis.MouseEvent) => {
       const target = event.target as Element | null;
       const control = target?.closest<HTMLElement>(".sidebar-space-control");
       if (control) return;
       setIsSpaceSelectOpen(false);
       setIsSpaceMenuOpen(false);
+      if (!target?.closest(".sidebar-search")) {
+        setIsCalOpen(false);
+      }
     };
     window.addEventListener("mousedown", onPointerDown);
     return () => window.removeEventListener("mousedown", onPointerDown);
-  }, [isSpaceMenuOpen, isSpaceSelectOpen]);
+  }, [isSpaceMenuOpen, isSpaceSelectOpen, isCalOpen]);
 
   return (
     <aside className="sidebar" ref={wrapRef}>
@@ -1276,7 +1370,7 @@ function Sidebar({
           {mode === "siblings" ? "Siblings" : "All threads"}{" "}
           <span className="muted">{items.length}</span>
         </div>
-        <div className="sidebar-search">
+        <div className="sidebar-search" style={{ position: "relative" }}>
           <Icons.Search />
           <input
             placeholder="Search"
@@ -1292,6 +1386,25 @@ function Sidebar({
             >
               <Icons.X />
             </button>
+          )}
+          <button
+            type="button"
+            className={`search-clear search-cal-btn${dateRange ? " is-active" : ""}`}
+            onClick={() => setIsCalOpen((prev) => !prev)}
+            aria-label={dateRange ? "Date filter active — click to change" : "Filter by date"}
+            title="Filter by date"
+          >
+            <Icons.Calendar />
+          </button>
+          {isCalOpen && (
+            <DateRangePicker
+              value={dateRange}
+              onChange={(r) => {
+                onDateRangeChange(r);
+                setIsCalOpen(false);
+              }}
+              onClose={() => setIsCalOpen(false)}
+            />
           )}
         </div>
         <div className="sidebar-list-wrap">
@@ -1604,6 +1717,7 @@ function Breadcrumb({
   thread,
   query,
   selectedTags,
+  dateRange,
   onClearFilters,
   onBack,
   onOpenThread,
@@ -1613,22 +1727,27 @@ function Breadcrumb({
   thread: ThreadView | null;
   query: string;
   selectedTags: string[];
+  dateRange: DateRange | null;
   onClearFilters: () => void;
   onBack: () => void;
   onOpenThread: (id: string) => void;
 }) {
   if (view.kind === "root") {
+    const hasFilters = query || selectedTags.length > 0 || dateRange;
+    const filterLabel = query
+      ? `"${query}"`
+      : dateRange
+        ? `${dateRange.from} → ${dateRange.to}`
+        : selectedTags.map((tag) => `#${tag}`).join(" + ");
     return (
       <div className="topbar-crumbs">
         <span className="crumb">{currentSpaceName}</span>
         <span className="crumb-sep">/</span>
         <span className="crumb is-current">All thoughts</span>
-        {(query || selectedTags.length > 0) && (
+        {hasFilters && (
           <>
             <span className="crumb-sep">/</span>
-            <span className="crumb is-current">
-              {query ? `"${query}"` : selectedTags.map((tag) => `#${tag}`).join(" + ")}
-            </span>
+            <span className="crumb is-current">{filterLabel}</span>
             <button
               type="button"
               className="btn btn-ghost btn-xs"
@@ -1699,6 +1818,7 @@ export default function App(): ReactNode {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [dateRange, setDateRange] = useState<DateRange | null>(null);
   const [activeReplyComposerId, setActiveReplyComposerId] = useState<string | null>(
     null,
   );
@@ -1843,7 +1963,7 @@ export default function App(): ReactNode {
   }, []);
 
   const refreshRoots = useCallback(
-    async (spaceId: string, textQuery: string, tagFilters: string[]) => {
+    async (spaceId: string, textQuery: string, tagFilters: string[], range: DateRange | null) => {
     const requestSeq = rootsRequestSeqRef.current + 1;
     rootsRequestSeqRef.current = requestSeq;
     setLoading(true);
@@ -1851,8 +1971,8 @@ export default function App(): ReactNode {
     try {
       const trimmedQuery = textQuery.trim();
       const data = trimmedQuery
-          ? await api.searchNotes(spaceId, trimmedQuery, tagFilters)
-          : await api.listRoots(spaceId, tagFilters);
+          ? await api.searchNotes(spaceId, trimmedQuery, tagFilters, range)
+          : await api.listRoots(spaceId, tagFilters, range);
         await refreshTags(spaceId);
       if (requestSeq !== rootsRequestSeqRef.current) return;
       setRoots(sortByNewest(data));
@@ -1889,11 +2009,11 @@ export default function App(): ReactNode {
   useEffect(() => {
     if (!currentSpaceId) return;
     if (view.kind === "root") {
-      void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
+      void refreshRoots(currentSpaceId, debouncedQuery, selectedTags, dateRange);
     } else {
       void refreshThread(currentSpaceId, view.noteId);
     }
-  }, [view, currentSpaceId, debouncedQuery, selectedTags, refreshRoots, refreshThread]);
+  }, [view, currentSpaceId, debouncedQuery, selectedTags, dateRange, refreshRoots, refreshThread]);
 
   useEffect(() => {
     if (!currentSpaceId) return;
@@ -1942,7 +2062,8 @@ export default function App(): ReactNode {
       // Always refresh to keep counts accurate (childCount on parents).
       if (view.kind === "root" && note.parentId === null) {
         const matchesActiveFilters =
-          selectedTags.length === 0 || selectedTags.every((tag) => note.tags.includes(tag));
+          (selectedTags.length === 0 || selectedTags.every((tag) => note.tags.includes(tag))) &&
+          (!dateRange || isNoteInDateRange(note.createdAt, dateRange));
         if (matchesActiveFilters) {
           setRoots((prev) => [note, ...prev]);
         }
@@ -1963,10 +2084,10 @@ export default function App(): ReactNode {
       }
       if (!currentSpaceId) return;
       void refreshTags(currentSpaceId);
-      if (view.kind === "root") void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
+      if (view.kind === "root") void refreshRoots(currentSpaceId, debouncedQuery, selectedTags, dateRange);
       else void refreshThread(currentSpaceId, view.noteId);
     },
-    [view, debouncedQuery, refreshRoots, refreshThread, refreshTags, selectedTags, currentSpaceId],
+    [view, debouncedQuery, dateRange, refreshRoots, refreshThread, refreshTags, selectedTags, currentSpaceId],
   );
 
   const handleOpenThread = useCallback(
@@ -2102,6 +2223,7 @@ export default function App(): ReactNode {
     (spaceId: string) => {
       setQuery("");
       setSelectedTags([]);
+      setDateRange(null);
       if (view.kind === "thread") {
         navigateToView({ kind: "root", spaceId });
       } else {
@@ -2241,6 +2363,11 @@ export default function App(): ReactNode {
         }}
         tags={spaceTags}
         onSelect={handleOpenThread}
+        dateRange={dateRange}
+        onDateRangeChange={(r) => {
+          setDateRange(r);
+          if (currentSpaceId) navigateToView({ kind: "root", spaceId: currentSpaceId });
+        }}
         onNew={() => {
           if (currentSpaceId) navigateToView({ kind: "root", spaceId: currentSpaceId });
           window.setTimeout(() => {

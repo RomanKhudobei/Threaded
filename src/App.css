@@ -124,6 +124,7 @@ kbd,
   padding: 22px 18px 18px;
   border-right: 1px solid var(--border);
   background: var(--bg-soft);
+  z-index: 20;
 }
 
 .sidebar-brand {
@@ -245,6 +246,47 @@ kbd,
 }
 .search-clear:hover {
   color: var(--text);
+}
+
+.search-cal-btn {
+  flex-shrink: 0;
+  transition: color 120ms;
+}
+.search-cal-btn.is-active {
+  color: var(--accent);
+}
+
+/* ——— date range picker ——— */
+.date-picker {
+  position: absolute;
+  top: 40px;
+  left: calc(80%);
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 12px;
+  user-select: none;
+}
+
+.date-picker .rdp-root {
+  --rdp-accent-color: var(--accent);
+  --rdp-accent-background-color: color-mix(in srgb, var(--accent) 12%, transparent);
+  --rdp-background-color: var(--bg-soft);
+  --rdp-selected-border: none;
+  --rdp-today-color: var(--accent);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
+.date-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .sidebar-space-list {

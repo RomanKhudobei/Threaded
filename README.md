@@ -153,3 +153,5 @@ list of popular tags with counts
 - [ ] Add buy me a coffee link
 - [ ] Додати маркери, виділення тексту, text editor 
 - [ ] Fix search (search by all? Only by listed?)
+- [ ] Make the app mobile-friendly
+- [ ] encrypt notes?
