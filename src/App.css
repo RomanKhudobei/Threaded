@@ -789,7 +789,6 @@ kbd,
   color: var(--text-4);
 }
 .tag-editor {
-  margin-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;

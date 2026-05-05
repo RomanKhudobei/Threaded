@@ -135,7 +135,7 @@ if data ever gets corrupted into a cycle.
 
 ## To Do
 - [ ] Refine shortcuts (ctrl+n for new note, arrows up and down to navigate thoughts, enter to go one level deeper, backspace to go one level upper)
-- [ ] Add tags
+- [x] Add tags
 - [ ] Add date range filter
 - [x] Add ability to edit thoughts
 - [x] Add ability to delete thoughts (send them into 30-day retention trash?)

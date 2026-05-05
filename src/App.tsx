@@ -368,6 +368,7 @@ function Wordmark({ size = "lg" }: { size?: "sm" | "lg" }) {
 
 // ——— rotating tagline (sidebar foot) ———
 const TAGLINES = [
+  "A quiet place to go deep.",
   "The best way to save your thoughts — write them down.",
   "The perfect place to break down your ideas.",
   "Your ideas are precious. Don't let them fade away.",
@@ -1337,10 +1338,6 @@ function Sidebar({
           />
         </div>
       </div>
-
-      <div className="sidebar-foot muted small">
-        <RotatingTagline />
-      </div>
     </aside>
   );
 }
@@ -1442,7 +1439,9 @@ function RootView({
       <section className="root-header">
         <section className="hero">
           <Wordmark />
-          <p className="hero-sub">A quiet place to go deep.</p>
+          <p className="hero-sub">
+            <RotatingTagline />
+          </p>
         </section>
 
         <section className="composer-wrap">
