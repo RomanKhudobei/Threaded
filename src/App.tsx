@@ -18,6 +18,7 @@ type Note = {
   text: string;
   createdAt: string;
   childCount: number;
+  tags: string[];
 };
 
 type Space = {
@@ -32,6 +33,11 @@ type ThreadView = {
   ancestors: Note[];
   hasMoreAncestors: boolean;
   totalAncestors: number;
+};
+
+type TagStat = {
+  name: string;
+  count: number;
 };
 
 type View =
@@ -103,6 +109,34 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+function normalizeTagName(tag: string): string {
+  return tag.trim().replace(/^#+/, "").toLowerCase();
+}
+
+function normalizeTags(tags: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of tags) {
+    const cleaned = normalizeTagName(tag);
+    if (!cleaned || !/^\w+$/.test(cleaned) || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    out.push(cleaned);
+  }
+  return out;
+}
+
+function stripInlineTags(text: string): string {
+  return text.replace(/(^|\s)#(\w+)/g, "$1").replace(/[ \t]+\n/g, "\n").trim();
+}
+
+function buildTagsQuery(tags: string[]): string {
+  const normalized = normalizeTags(tags);
+  if (normalized.length === 0) return "";
+  const params = new URLSearchParams();
+  normalized.forEach((tag) => params.append("tag", tag));
+  return `&${params.toString()}`;
+}
+
 const api = {
   listSpaces: () => http<Space[]>("/spaces"),
   createSpace: (name: string) =>
@@ -131,12 +165,16 @@ const api = {
       throw new Error(detail || `Request failed (${res.status})`);
     }
   },
-  listRoots: (spaceId: string) =>
-    http<Note[]>(`/notes?spaceId=${encodeURIComponent(spaceId)}`),
-  searchNotes: (spaceId: string, query: string) =>
+  listRoots: (spaceId: string, tags: string[] = []) =>
     http<Note[]>(
-      `/notes/search?spaceId=${encodeURIComponent(spaceId)}&query=${encodeURIComponent(query)}`,
+      `/notes?spaceId=${encodeURIComponent(spaceId)}${buildTagsQuery(tags)}`,
     ),
+  searchNotes: (spaceId: string, query: string, tags: string[] = []) =>
+    http<Note[]>(
+      `/notes/search?spaceId=${encodeURIComponent(spaceId)}&query=${encodeURIComponent(query)}${buildTagsQuery(tags)}`,
+    ),
+  listTags: (spaceId: string) =>
+    http<TagStat[]>(`/tags?spaceId=${encodeURIComponent(spaceId)}`),
   listByParent: (spaceId: string, parentId: string) =>
     http<Note[]>(
       `/notes?spaceId=${encodeURIComponent(spaceId)}&parentId=${encodeURIComponent(parentId)}`,
@@ -145,15 +183,20 @@ const api = {
     http<ThreadView>(
       `/notes/${encodeURIComponent(id)}/thread?spaceId=${encodeURIComponent(spaceId)}`,
     ),
-  createNote: (spaceId: string, text: string, parentId: string | null) =>
+  createNote: (
+    spaceId: string,
+    text: string,
+    parentId: string | null,
+    tags: string[],
+  ) =>
     http<Note>("/notes", {
       method: "POST",
-      body: JSON.stringify({ text, parentId, spaceId }),
+      body: JSON.stringify({ text, parentId, spaceId, tags: normalizeTags(tags) }),
     }),
-  updateNote: (spaceId: string, id: string, text: string) =>
+  updateNote: (spaceId: string, id: string, text: string, tags: string[]) =>
     http<Note>(`/notes/${encodeURIComponent(id)}?spaceId=${encodeURIComponent(spaceId)}`, {
       method: "PATCH",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, tags: normalizeTags(tags) }),
     }),
   deleteNote: async (spaceId: string, id: string) => {
     const res = await fetch(
@@ -236,12 +279,6 @@ function relTimestamp(iso: string): string {
 function truncate(text: string, max = 80): string {
   const compact = text.replace(/\s+/g, " ").trim();
   return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
-}
-
-function extractTags(text: string): string[] {
-  const out: string[] = [];
-  for (const m of text.matchAll(/#(\w+)/g)) out.push(m[1]);
-  return out;
 }
 
 // ——— icons ———
@@ -369,6 +406,7 @@ function RotatingTagline() {
 type ComposerProps = {
   spaceId: string;
   parentId: string | null;
+  availableTags: string[];
   placeholder: string;
   ctaLabel?: string;
   variant?: "primary" | "inline";
@@ -378,9 +416,150 @@ type ComposerProps = {
   onCreated: (note: Note) => void;
 };
 
+type TagChipInputProps = {
+  tags: string[];
+  onChange: (next: string[]) => void;
+  suggestions: string[];
+  disabled?: boolean;
+};
+
+function TagChipInput({
+  tags,
+  onChange,
+  suggestions,
+  disabled = false,
+}: TagChipInputProps) {
+  const [draft, setDraft] = useState("");
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
+  const isTagDraft = draft.startsWith("#");
+  const normalizedDraft = normalizeTagName(draft);
+  const filteredSuggestions = useMemo(() => {
+    if (!isTagDraft) return [];
+    const lower = normalizedDraft.toLowerCase();
+    return normalizeTags(suggestions).filter(
+      (tag) => !tags.includes(tag) && (lower.length === 0 || tag.startsWith(lower)),
+    );
+  }, [isTagDraft, normalizedDraft, suggestions, tags]);
+
+  useEffect(() => {
+    setActiveSuggestion(0);
+  }, [normalizedDraft]);
+
+  const addTag = useCallback(
+    (raw: string) => {
+      const normalized = normalizeTagName(raw);
+      if (!normalized || !/^\w+$/.test(normalized) || tags.includes(normalized)) return;
+      onChange([...tags, normalized]);
+      setDraft("");
+      setActiveSuggestion(0);
+    },
+    [onChange, tags],
+  );
+
+  const removeTag = useCallback(
+    (name: string) => {
+      onChange(tags.filter((tag) => tag !== name));
+    },
+    [onChange, tags],
+  );
+
+  const commitDraft = useCallback(() => {
+    if (!draft.startsWith("#")) return;
+    if (filteredSuggestions.length > 0) {
+      addTag(filteredSuggestions[Math.min(activeSuggestion, filteredSuggestions.length - 1)]);
+      return;
+    }
+    addTag(draft);
+  }, [activeSuggestion, addTag, draft, filteredSuggestions]);
+
+  const onDraftKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!draft) {
+      if (event.key === "Backspace" && tags.length > 0) {
+        event.preventDefault();
+        removeTag(tags[tags.length - 1]);
+      }
+      return;
+    }
+    if (event.key === "ArrowDown" && filteredSuggestions.length > 0) {
+      event.preventDefault();
+      setActiveSuggestion((prev) => (prev + 1) % filteredSuggestions.length);
+      return;
+    }
+    if (event.key === "ArrowUp" && filteredSuggestions.length > 0) {
+      event.preventDefault();
+      setActiveSuggestion((prev) =>
+        prev === 0 ? filteredSuggestions.length - 1 : prev - 1,
+      );
+      return;
+    }
+    if (event.key === "Enter" || event.key === "Tab" || event.key === " " || event.key === ",") {
+      if (!draft.startsWith("#")) return;
+      event.preventDefault();
+      commitDraft();
+      return;
+    }
+    if (event.key === "Escape") {
+      setDraft("");
+    }
+  };
+
+  return (
+    <div className="tag-editor">
+      {tags.length > 0 && (
+        <div className="tag-editor-chips">
+          {tags.map((tag) => (
+            <span key={tag} className="tag-editor-chip">
+              #{tag}
+              <button
+                type="button"
+                className="tag-editor-chip-remove"
+                onClick={() => removeTag(tag)}
+                aria-label={`Remove ${tag} tag`}
+                disabled={disabled}
+              >
+                <Icons.X />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="tag-editor-input-wrap">
+        <input
+          className="tag-editor-input"
+          placeholder="Type #tag and press Space"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onDraftKeyDown}
+          disabled={disabled}
+        />
+        {isTagDraft && filteredSuggestions.length > 0 && (
+          <div className="tag-editor-suggestions" role="listbox" aria-label="Tag suggestions">
+            {filteredSuggestions.map((tag, index) => (
+              <button
+                key={tag}
+                type="button"
+                className={`tag-editor-suggestion ${index === activeSuggestion ? "is-active" : ""}`}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  addTag(tag);
+                }}
+                role="option"
+                aria-selected={index === activeSuggestion}
+              >
+                #{tag}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Composer({
   spaceId,
   parentId,
+  availableTags,
   placeholder,
   ctaLabel = "Add thought",
   variant = "primary",
@@ -390,6 +569,7 @@ function Composer({
   onCreated,
 }: ComposerProps) {
   const [text, setText] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -401,13 +581,15 @@ function Composer({
   const submit = useCallback(
     async (event?: FormEvent) => {
       event?.preventDefault();
-      const trimmed = text.trim();
+      const trimmed = stripInlineTags(text);
+      const normalizedTags = normalizeTags(tags);
       if (!trimmed) return;
       setSubmitting(true);
       setError(null);
       try {
-        const note = await api.createNote(spaceId, trimmed, parentId);
+        const note = await api.createNote(spaceId, trimmed, parentId, normalizedTags);
         setText("");
+        setTags([]);
         onCreated(note);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not save note");
@@ -415,7 +597,7 @@ function Composer({
         setSubmitting(false);
       }
     },
-    [spaceId, text, parentId, onCreated],
+    [spaceId, text, parentId, onCreated, tags],
   );
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -443,6 +625,12 @@ function Composer({
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
         rows={compact ? 2 : singleLine ? 1 : 4}
+        disabled={submitting}
+      />
+      <TagChipInput
+        tags={tags}
+        onChange={setTags}
+        suggestions={availableTags}
         disabled={submitting}
       />
       <div className="composer-row">
@@ -484,12 +672,13 @@ function Composer({
 // ——— thought card ———
 type ThoughtCardProps = {
   note: Note;
+  availableTags: string[];
   isChildCard?: boolean;
   timestampStyle?: "full" | "time-only" | "hidden";
   showRepliesChip?: boolean;
   onOpenThread: (noteId: string) => void;
   onCreated: (note: Note) => void;
-  onUpdated: (noteId: string, text: string) => Promise<void>;
+  onUpdated: (noteId: string, text: string, tags: string[]) => Promise<void>;
   onDeleted: (note: Note) => Promise<void>;
   activeReplyComposerId: string | null;
   onReplyComposerChange: (noteId: string | null) => void;
@@ -498,6 +687,7 @@ type ThoughtCardProps = {
 
 function ThoughtCard({
   note,
+  availableTags,
   isChildCard = false,
   timestampStyle = "full",
   showRepliesChip = true,
@@ -512,25 +702,24 @@ function ThoughtCard({
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [draftText, setDraftText] = useState(note.text);
+  const [draftTags, setDraftTags] = useState<string[]>(note.tags ?? []);
   const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const replying = activeReplyComposerId === note.id;
-  const tags = useMemo(() => extractTags(note.text), [note.text]);
-  const displayText = useMemo(
-    () => note.text.replace(/#(\w+)/g, "").replace(/\s+\n/g, "\n").trim() || note.text,
-    [note.text],
-  );
+  const tags = note.tags ?? [];
+  const displayText = note.text;
   const replies = note.childCount;
 
   useEffect(() => {
     if (!isEditing) {
       setDraftText(note.text);
+      setDraftTags(note.tags ?? []);
       setEditError(null);
     }
-  }, [note.text, isEditing]);
+  }, [note.text, note.tags, isEditing]);
 
   useEffect(() => {
     if (!isEditing) return;
@@ -569,21 +758,27 @@ function ThoughtCard({
     if (savingEdit) return;
     setIsEditing(false);
     setDraftText(note.text);
+    setDraftTags(note.tags ?? []);
     setEditError(null);
-  }, [savingEdit, note.text]);
+  }, [savingEdit, note.text, note.tags]);
 
   const openEditor = useCallback(() => {
     onReplyComposerChange(null);
     setIsEditing(true);
     setDraftText(note.text);
+    setDraftTags(note.tags ?? []);
     setEditError(null);
     setIsActionsMenuOpen(false);
-  }, [note.text, onReplyComposerChange]);
+  }, [note.text, note.tags, onReplyComposerChange]);
 
   const submitEdit = useCallback(async () => {
-    const trimmed = draftText.trim();
+    const trimmed = stripInlineTags(draftText);
+    const normalizedTags = normalizeTags(draftTags);
     if (!trimmed) return;
-    if (trimmed === note.text) {
+    if (
+      trimmed === note.text &&
+      normalizedTags.join(",") === normalizeTags(note.tags ?? []).join(",")
+    ) {
       setIsEditing(false);
       setEditError(null);
       return;
@@ -591,14 +786,14 @@ function ThoughtCard({
     setSavingEdit(true);
     setEditError(null);
     try {
-      await onUpdated(note.id, trimmed);
+      await onUpdated(note.id, trimmed, normalizedTags);
       setIsEditing(false);
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "Could not save note");
     } finally {
       setSavingEdit(false);
     }
-  }, [draftText, note.id, note.text, onUpdated]);
+  }, [draftText, draftTags, note.id, note.text, note.tags, onUpdated]);
 
   const onEditKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -658,6 +853,12 @@ function ThoughtCard({
               rows={3}
               disabled={savingEdit}
               autoFocus
+            />
+            <TagChipInput
+              tags={draftTags}
+              onChange={setDraftTags}
+              suggestions={availableTags}
+              disabled={savingEdit}
             />
             <div className="thought-edit-row">
               {editError ? (
@@ -790,6 +991,7 @@ function ThoughtCard({
           <Composer
             spaceId={note.spaceId}
             parentId={note.id}
+            availableTags={availableTags}
             placeholder="Continue the thread…"
             ctaLabel="Reply"
             variant="inline"
@@ -862,9 +1064,9 @@ type SidebarProps = {
   currentThreadId: string | null;
   query: string;
   onQueryChange: (q: string) => void;
-  activeTag: string | null;
+  selectedTags: string[];
   onTagClick: (tag: string) => void;
-  tags: { name: string; count: number }[];
+  tags: TagStat[];
   onSelect: (id: string) => void;
   onNew: () => void;
 };
@@ -881,7 +1083,7 @@ function Sidebar({
   currentThreadId,
   query,
   onQueryChange,
-  activeTag,
+  selectedTags,
   onTagClick,
   tags,
   onSelect,
@@ -1055,7 +1257,7 @@ function Sidebar({
               <button
                 key={t.name}
                 type="button"
-                className={`chip ${activeTag === t.name ? "is-active" : ""}`}
+                className={`chip ${selectedTags.includes(t.name) ? "is-active" : ""}`}
                 onClick={() => onTagClick(t.name)}
               >
                 #{t.name}
@@ -1146,12 +1348,12 @@ function Sidebar({
 // ——— empty state ———
 function EmptyState({
   query,
-  activeTag,
+  selectedTags,
 }: {
   query: string;
-  activeTag: string | null;
+  selectedTags: string[];
 }) {
-  if (query || activeTag) {
+  if (query || selectedTags.length > 0) {
     return (
       <div className="empty">
         <div className="empty-mark">
@@ -1184,14 +1386,15 @@ function EmptyState({
 // ——— root view (feed) ———
 type RootViewProps = {
   activeSpaceId: string;
+  availableTags: string[];
   roots: Note[];
   loading: boolean;
   error: string | null;
   query: string;
-  activeTag: string | null;
+  selectedTags: string[];
   headerCompact: boolean;
   onCreated: (note: Note) => void;
-  onUpdated: (noteId: string, text: string) => Promise<void>;
+  onUpdated: (noteId: string, text: string, tags: string[]) => Promise<void>;
   onDeleted: (note: Note) => Promise<void>;
   onOpenThread: (id: string) => void;
   activeReplyComposerId: string | null;
@@ -1200,11 +1403,12 @@ type RootViewProps = {
 
 function RootView({
   activeSpaceId,
+  availableTags,
   roots,
   loading,
   error,
   query,
-  activeTag,
+  selectedTags,
   headerCompact,
   onCreated,
   onUpdated,
@@ -1245,6 +1449,7 @@ function RootView({
           <Composer
             spaceId={activeSpaceId}
             parentId={null}
+            availableTags={availableTags}
             placeholder="What's on your mind?"
             ctaLabel="Add thought"
             singleLine={headerCompact}
@@ -1258,7 +1463,7 @@ function RootView({
       {loading && roots.length === 0 ? (
         <div className="loading">Loading thoughts…</div>
       ) : roots.length === 0 ? (
-        <EmptyState query={query} activeTag={activeTag} />
+        <EmptyState query={query} selectedTags={selectedTags} />
       ) : (
         <section className="feed">
           {groupedRoots.map((group) => (
@@ -1271,6 +1476,7 @@ function RootView({
                   <article key={root.id} className="feed-item">
                     <ThoughtCard
                       note={root}
+                      availableTags={availableTags}
                       timestampStyle="time-only"
                       onOpenThread={onOpenThread}
                       onCreated={onCreated}
@@ -1293,12 +1499,13 @@ function RootView({
 // ——— thread view ———
 type ThreadPageProps = {
   thread: ThreadView | null;
+  availableTags: string[];
   loading: boolean;
   error: string | null;
   threadHeaderCompact: boolean;
   onGoUpLevel: () => void;
   onCreated: (note: Note) => void;
-  onUpdated: (noteId: string, text: string) => Promise<void>;
+  onUpdated: (noteId: string, text: string, tags: string[]) => Promise<void>;
   onDeleted: (note: Note) => Promise<void>;
   onOpenThread: (id: string) => void;
   activeReplyComposerId: string | null;
@@ -1307,6 +1514,7 @@ type ThreadPageProps = {
 
 function ThreadPage({
   thread,
+  availableTags,
   loading,
   error,
   threadHeaderCompact,
@@ -1349,6 +1557,7 @@ function ThreadPage({
         <div className="thread-focus-card">
           <ThoughtCard
             note={note}
+            availableTags={availableTags}
             showRepliesChip={false}
             onOpenThread={onOpenThread}
             onCreated={onCreated}
@@ -1370,6 +1579,7 @@ function ThreadPage({
               <div className="node-content">
                 <ThoughtCard
                   note={child}
+                  availableTags={availableTags}
                   onOpenThread={onOpenThread}
                   onCreated={onCreated}
                   onUpdated={onUpdated}
@@ -1392,7 +1602,7 @@ function Breadcrumb({
   currentSpaceName,
   thread,
   query,
-  activeTag,
+  selectedTags,
   onClearFilters,
   onBack,
   onOpenThread,
@@ -1401,7 +1611,7 @@ function Breadcrumb({
   currentSpaceName: string;
   thread: ThreadView | null;
   query: string;
-  activeTag: string | null;
+  selectedTags: string[];
   onClearFilters: () => void;
   onBack: () => void;
   onOpenThread: (id: string) => void;
@@ -1412,11 +1622,11 @@ function Breadcrumb({
         <span className="crumb">{currentSpaceName}</span>
         <span className="crumb-sep">/</span>
         <span className="crumb is-current">All thoughts</span>
-        {(query || activeTag) && (
+        {(query || selectedTags.length > 0) && (
           <>
             <span className="crumb-sep">/</span>
             <span className="crumb is-current">
-              {query ? `"${query}"` : `#${activeTag}`}
+              {query ? `"${query}"` : selectedTags.map((tag) => `#${tag}`).join(" + ")}
             </span>
             <button
               type="button"
@@ -1479,6 +1689,7 @@ export default function App(): ReactNode {
   });
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [roots, setRoots] = useState<Note[]>([]);
+  const [spaceTags, setSpaceTags] = useState<TagStat[]>([]);
   const [sidebarThreads, setSidebarThreads] = useState<Note[]>([]);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("roots");
   const [thread, setThread] = useState<ThreadView | null>(null);
@@ -1486,7 +1697,7 @@ export default function App(): ReactNode {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [activeReplyComposerId, setActiveReplyComposerId] = useState<string | null>(
     null,
   );
@@ -1621,7 +1832,17 @@ export default function App(): ReactNode {
     [view],
   );
 
-  const refreshRoots = useCallback(async (spaceId: string, textQuery: string) => {
+  const refreshTags = useCallback(async (spaceId: string) => {
+    try {
+      const data = await api.listTags(spaceId);
+      setSpaceTags(data);
+    } catch {
+      setSpaceTags([]);
+    }
+  }, []);
+
+  const refreshRoots = useCallback(
+    async (spaceId: string, textQuery: string, tagFilters: string[]) => {
     const requestSeq = rootsRequestSeqRef.current + 1;
     rootsRequestSeqRef.current = requestSeq;
     setLoading(true);
@@ -1629,8 +1850,9 @@ export default function App(): ReactNode {
     try {
       const trimmedQuery = textQuery.trim();
       const data = trimmedQuery
-        ? await api.searchNotes(spaceId, trimmedQuery)
-        : await api.listRoots(spaceId);
+          ? await api.searchNotes(spaceId, trimmedQuery, tagFilters)
+          : await api.listRoots(spaceId, tagFilters);
+        await refreshTags(spaceId);
       if (requestSeq !== rootsRequestSeqRef.current) return;
       setRoots(sortByNewest(data));
     } catch (err) {
@@ -1640,7 +1862,9 @@ export default function App(): ReactNode {
       if (requestSeq !== rootsRequestSeqRef.current) return;
       setLoading(false);
     }
-  }, []);
+    },
+    [refreshTags],
+  );
 
   const refreshThread = useCallback(async (spaceId: string, noteId: string) => {
     setLoading(true);
@@ -1658,12 +1882,17 @@ export default function App(): ReactNode {
 
   useEffect(() => {
     if (!currentSpaceId) return;
+    void refreshTags(currentSpaceId);
+  }, [currentSpaceId, refreshTags]);
+
+  useEffect(() => {
+    if (!currentSpaceId) return;
     if (view.kind === "root") {
-      void refreshRoots(currentSpaceId, debouncedQuery);
+      void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
     } else {
       void refreshThread(currentSpaceId, view.noteId);
     }
-  }, [view, currentSpaceId, debouncedQuery, refreshRoots, refreshThread]);
+  }, [view, currentSpaceId, debouncedQuery, selectedTags, refreshRoots, refreshThread]);
 
   useEffect(() => {
     if (!currentSpaceId) return;
@@ -1711,7 +1940,12 @@ export default function App(): ReactNode {
     (note: Note) => {
       // Always refresh to keep counts accurate (childCount on parents).
       if (view.kind === "root" && note.parentId === null) {
-        setRoots((prev) => [note, ...prev]);
+        const matchesActiveFilters =
+          selectedTags.length === 0 || selectedTags.every((tag) => note.tags.includes(tag));
+        if (matchesActiveFilters) {
+          setRoots((prev) => [note, ...prev]);
+        }
+        if (currentSpaceId) void refreshTags(currentSpaceId);
         return;
       }
       if (view.kind === "thread" && note.parentId === view.noteId) {
@@ -1727,10 +1961,11 @@ export default function App(): ReactNode {
         return;
       }
       if (!currentSpaceId) return;
-      if (view.kind === "root") void refreshRoots(currentSpaceId, debouncedQuery);
+      void refreshTags(currentSpaceId);
+      if (view.kind === "root") void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
       else void refreshThread(currentSpaceId, view.noteId);
     },
-    [view, debouncedQuery, refreshRoots, refreshThread, currentSpaceId],
+    [view, debouncedQuery, refreshRoots, refreshThread, refreshTags, selectedTags, currentSpaceId],
   );
 
   const handleOpenThread = useCallback(
@@ -1756,22 +1991,26 @@ export default function App(): ReactNode {
   }, [thread, handleOpenThread, handleBack]);
 
   const handleUpdated = useCallback(
-    async (noteId: string, text: string) => {
+    async (noteId: string, text: string, tags: string[]) => {
       if (!currentSpaceId) return;
       try {
-        const updated = await api.updateNote(currentSpaceId, noteId, text);
+        const updated = await api.updateNote(currentSpaceId, noteId, text, tags);
         setError(null);
 
         setRoots((prev) =>
-          prev.map((note) => (note.id === updated.id ? { ...note, text: updated.text } : note)),
+          prev.map((note) =>
+            note.id === updated.id ? { ...note, text: updated.text, tags: updated.tags } : note,
+          ),
         );
         setSidebarThreads((prev) =>
-          prev.map((note) => (note.id === updated.id ? { ...note, text: updated.text } : note)),
+          prev.map((note) =>
+            note.id === updated.id ? { ...note, text: updated.text, tags: updated.tags } : note,
+          ),
         );
         setThread((prev) => {
           if (!prev) return prev;
           const patch = (note: Note): Note =>
-            note.id === updated.id ? { ...note, text: updated.text } : note;
+            note.id === updated.id ? { ...note, text: updated.text, tags: updated.tags } : note;
           return {
             ...prev,
             note: patch(prev.note),
@@ -1781,7 +2020,8 @@ export default function App(): ReactNode {
         });
 
         // Keep expanded descendants in sync when they are not in local thread state.
-        if (view.kind === "root") void refreshRoots(currentSpaceId, debouncedQuery);
+        void refreshTags(currentSpaceId);
+        if (view.kind === "root") void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
         else void refreshThread(currentSpaceId, view.noteId);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not update note";
@@ -1789,7 +2029,15 @@ export default function App(): ReactNode {
         throw err;
       }
     },
-    [view, debouncedQuery, refreshRoots, refreshThread, currentSpaceId],
+    [
+      view,
+      debouncedQuery,
+      refreshRoots,
+      refreshThread,
+      refreshTags,
+      selectedTags,
+      currentSpaceId,
+    ],
   );
 
   const handleDeleted = useCallback(
@@ -1798,6 +2046,7 @@ export default function App(): ReactNode {
       try {
         await api.deleteNote(currentSpaceId, note.id);
         setError(null);
+        void refreshTags(currentSpaceId);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not delete note";
         setError(message);
@@ -1818,30 +2067,40 @@ export default function App(): ReactNode {
           void refreshThread(currentSpaceId, note.parentId);
         } else {
           navigateToView({ kind: "root", spaceId: currentSpaceId });
-          void refreshRoots(currentSpaceId, debouncedQuery);
+          void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
         }
         return;
       }
 
       if (deletedAncestor) {
         navigateToView({ kind: "root", spaceId: currentSpaceId });
-        void refreshRoots(currentSpaceId, debouncedQuery);
+        void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
         return;
       }
 
       if (view.kind === "root") {
-        void refreshRoots(currentSpaceId, debouncedQuery);
+        void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
       } else {
         void refreshThread(currentSpaceId, view.noteId);
       }
     },
-    [view, thread, debouncedQuery, navigateToView, refreshRoots, refreshThread, currentSpaceId],
+    [
+      view,
+      thread,
+      debouncedQuery,
+      navigateToView,
+      refreshRoots,
+      refreshThread,
+      refreshTags,
+      selectedTags,
+      currentSpaceId,
+    ],
   );
 
   const handleSelectSpace = useCallback(
     (spaceId: string) => {
       setQuery("");
-      setActiveTag(null);
+      setSelectedTags([]);
       if (view.kind === "thread") {
         navigateToView({ kind: "root", spaceId });
       } else {
@@ -1944,22 +2203,6 @@ export default function App(): ReactNode {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const tags = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of roots) {
-      for (const tag of extractTags(r.text)) {
-        counts.set(tag, (counts.get(tag) ?? 0) + 1);
-      }
-    }
-    return [...counts.entries()]
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count);
-  }, [roots]);
-
-  const filteredRoots = useMemo(() => {
-    return roots.filter((r) => !activeTag || extractTags(r.text).includes(activeTag));
-  }, [roots, activeTag]);
-
   const currentThreadId = view.kind === "thread" ? view.noteId : null;
   if (spaces.length === 0) {
     return (
@@ -1988,12 +2231,14 @@ export default function App(): ReactNode {
           setQuery(q);
           if (currentSpaceId) navigateToView({ kind: "root", spaceId: currentSpaceId });
         }}
-        activeTag={activeTag}
+        selectedTags={selectedTags}
         onTagClick={(t) => {
-          setActiveTag((prev) => (prev === t ? null : t));
+          setSelectedTags((prev) =>
+            prev.includes(t) ? prev.filter((tag) => tag !== t) : [...prev, t],
+          );
           if (currentSpaceId) navigateToView({ kind: "root", spaceId: currentSpaceId });
         }}
-        tags={tags}
+        tags={spaceTags}
         onSelect={handleOpenThread}
         onNew={() => {
           if (currentSpaceId) navigateToView({ kind: "root", spaceId: currentSpaceId });
@@ -2014,10 +2259,10 @@ export default function App(): ReactNode {
             currentSpaceName={currentSpaceName}
             thread={thread}
             query={query}
-            activeTag={activeTag}
+            selectedTags={selectedTags}
             onClearFilters={() => {
               setQuery("");
-              setActiveTag(null);
+              setSelectedTags([]);
             }}
             onBack={handleBack}
             onOpenThread={handleOpenThread}
@@ -2039,11 +2284,12 @@ export default function App(): ReactNode {
           {view.kind === "root" ? (
             <RootView
               activeSpaceId={currentSpaceId ?? ""}
-              roots={filteredRoots}
+              availableTags={spaceTags.map((tag) => tag.name)}
+              roots={roots}
               loading={loading}
               error={error}
               query={query}
-              activeTag={activeTag}
+              selectedTags={selectedTags}
               headerCompact={isHeaderCompact}
               onCreated={handleCreated}
               onUpdated={handleUpdated}
@@ -2055,6 +2301,7 @@ export default function App(): ReactNode {
           ) : (
             <ThreadPage
               thread={thread}
+              availableTags={spaceTags.map((tag) => tag.name)}
               loading={loading}
               error={error}
               threadHeaderCompact={isThreadHeaderCompact}

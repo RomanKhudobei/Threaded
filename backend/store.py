@@ -12,6 +12,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Optional
 from uuid import uuid4
 
@@ -44,6 +45,7 @@ class Note:
     text: str
     createdAt: str
     childCount: int = 0
+    tags: list[str] | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -53,7 +55,59 @@ class Note:
             "text": self.text,
             "createdAt": self.createdAt,
             "childCount": self.childCount,
+            "tags": self.tags or [],
         }
+
+
+@dataclass
+class Tag:
+    id: str
+    spaceId: str
+    name: str
+    createdAt: str
+    noteCount: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "spaceId": self.spaceId,
+            "name": self.name,
+            "createdAt": self.createdAt,
+            "noteCount": self.noteCount,
+        }
+
+
+_TAG_PATTERN = re.compile(r"#(\w+)")
+
+
+def _extract_text_tags(text: str) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+    for match in _TAG_PATTERN.finditer(text):
+        tag = match.group(1).lower()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        tags.append(tag)
+    return tags
+
+
+def _normalize_tags(tags: list[str] | None) -> list[str]:
+    if not tags:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw_tag in tags:
+        cleaned = raw_tag.strip().lstrip("#").lower()
+        if not cleaned:
+            continue
+        if not cleaned.isidentifier() and not cleaned.replace("_", "").isalnum():
+            continue
+        if cleaned in seen:
+            continue
+        seen.add(cleaned)
+        out.append(cleaned)
+    return out
 
 
 _SCHEMA_SQL = """
@@ -69,6 +123,20 @@ CREATE TABLE IF NOT EXISTS notes (
     parent_id TEXT REFERENCES notes(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tags (
+    id TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(space_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS note_tags (
+    note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY(note_id, tag_id)
 );
 """
 
@@ -95,6 +163,7 @@ def _row_to_note(row: aiosqlite.Row) -> Note:
         text=row["text"],
         createdAt=row["created_at"],
         childCount=int(child_count or 0),
+        tags=[],
     )
 
 
@@ -103,6 +172,20 @@ def _row_to_space(row: aiosqlite.Row) -> Space:
         id=row["id"],
         name=row["name"],
         createdAt=row["created_at"],
+    )
+
+
+def _row_to_tag(row: aiosqlite.Row) -> Tag:
+    try:
+        note_count = row["note_count"]
+    except (IndexError, KeyError):
+        note_count = 0
+    return Tag(
+        id=row["id"],
+        spaceId=row["space_id"],
+        name=row["name"],
+        createdAt=row["created_at"],
+        noteCount=int(note_count or 0),
     )
 
 
@@ -182,6 +265,107 @@ class NoteStore:
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_spaces_created_at ON spaces(created_at)"
         )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tags_space_name ON tags(space_id, name)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_tags_note_id ON note_tags(note_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id ON note_tags(tag_id)"
+        )
+        await self._backfill_tags(conn)
+
+    async def _backfill_tags(self, conn: aiosqlite.Connection) -> None:
+        cursor = await conn.execute("SELECT id, space_id, text FROM notes")
+        rows = await cursor.fetchall()
+        await cursor.close()
+        for row in rows:
+            tags = _extract_text_tags(row["text"])
+            if not tags:
+                continue
+            await self._replace_note_tags(
+                conn=conn,
+                note_id=row["id"],
+                space_id=row["space_id"],
+                tags=tags,
+            )
+
+    async def _replace_note_tags(
+        self,
+        conn: aiosqlite.Connection,
+        note_id: str,
+        space_id: str,
+        tags: list[str],
+    ) -> None:
+        normalized_tags = _normalize_tags(tags)
+        await conn.execute("DELETE FROM note_tags WHERE note_id = ?", (note_id,))
+        if not normalized_tags:
+            return
+
+        for tag in normalized_tags:
+            tag_cursor = await conn.execute(
+                "SELECT id FROM tags WHERE space_id = ? AND name = ?",
+                (space_id, tag),
+            )
+            tag_row = await tag_cursor.fetchone()
+            await tag_cursor.close()
+            if tag_row is None:
+                tag_id = uuid4().hex
+                await conn.execute(
+                    "INSERT INTO tags (id, space_id, name, created_at) VALUES (?, ?, ?, ?)",
+                    (tag_id, space_id, tag, datetime.now(timezone.utc).isoformat()),
+                )
+            else:
+                tag_id = tag_row["id"]
+            await conn.execute(
+                "INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?, ?)",
+                (note_id, tag_id),
+            )
+
+    async def _attach_tags_to_notes(
+        self, conn: aiosqlite.Connection, notes: list[Note]
+    ) -> list[Note]:
+        if not notes:
+            return notes
+        placeholders = ",".join("?" for _ in notes)
+        note_ids = [note.id for note in notes]
+        cursor = await conn.execute(
+            f"""
+            SELECT nt.note_id, t.name
+            FROM note_tags nt
+            JOIN tags t ON t.id = nt.tag_id
+            WHERE nt.note_id IN ({placeholders})
+            ORDER BY t.name ASC
+            """,
+            note_ids,
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        tags_by_note: dict[str, list[str]] = {note.id: [] for note in notes}
+        for row in rows:
+            tags_by_note[row["note_id"]].append(row["name"])
+        for note in notes:
+            note.tags = tags_by_note.get(note.id, [])
+        return notes
+
+    def _tags_filter_clause(self, tags: list[str]) -> tuple[str, list[str]]:
+        normalized = _normalize_tags(tags)
+        if not normalized:
+            return "", []
+        placeholders = ",".join("?" for _ in normalized)
+        clause = (
+            "AND n.id IN ("
+            "SELECT nt.note_id "
+            "FROM note_tags nt "
+            "JOIN tags t ON t.id = nt.tag_id "
+            f"WHERE t.space_id = ? AND t.name IN ({placeholders}) "
+            "GROUP BY nt.note_id "
+            "HAVING COUNT(DISTINCT t.name) = ?"
+            ") "
+        )
+        params = [*normalized]
+        return clause, params
 
     async def close(self) -> None:
         async with self._init_lock:
@@ -276,7 +460,34 @@ class NoteStore:
         await cursor.close()
         return _row_to_space(row) if row else None
 
-    async def list_children(self, space_id: str, parent_id: Optional[str]) -> list[Note]:
+    async def list_tags(self, space_id: str) -> list[Tag]:
+        conn = await self._ensure_conn()
+        cursor = await conn.execute(
+            """
+            SELECT
+                t.id,
+                t.space_id,
+                t.name,
+                t.created_at,
+                COUNT(nt.note_id) AS note_count
+            FROM tags t
+            LEFT JOIN note_tags nt ON nt.tag_id = t.id
+            WHERE t.space_id = ?
+            GROUP BY t.id
+            ORDER BY note_count DESC, t.name ASC
+            """,
+            (space_id,),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        return [_row_to_tag(row) for row in rows]
+
+    async def list_children(
+        self,
+        space_id: str,
+        parent_id: Optional[str],
+        tags: Optional[list[str]] = None,
+    ) -> list[Note]:
         conn = await self._ensure_conn()
         # Subquery yields the direct-child count per row so the UI can render
         # "Show N replies" affordances without an extra fetch per note.
@@ -286,21 +497,41 @@ class NoteStore:
             "(SELECT COUNT(*) FROM notes c WHERE c.parent_id = n.id AND c.space_id = n.space_id) AS child_count "
             "FROM notes n"
         )
+        normalized_tags = _normalize_tags(tags)
+        filter_clause = ""
+        filter_params: list[str | int] = []
+        if normalized_tags:
+            placeholders = ",".join("?" for _ in normalized_tags)
+            filter_clause = (
+                "AND n.id IN ("
+                "SELECT nt.note_id "
+                "FROM note_tags nt "
+                "JOIN tags t ON t.id = nt.tag_id "
+                f"WHERE t.space_id = ? AND t.name IN ({placeholders}) "
+                "GROUP BY nt.note_id "
+                "HAVING COUNT(DISTINCT t.name) = ?"
+                ") "
+            )
+            filter_params = [space_id, *normalized_tags, len(normalized_tags)]
+
         if parent_id is None:
             cursor = await conn.execute(
-                f"{select_clause} WHERE n.space_id = ? AND n.parent_id IS NULL ORDER BY n.created_at ASC",
-                (space_id,),
+                f"{select_clause} WHERE n.space_id = ? AND n.parent_id IS NULL {filter_clause}ORDER BY n.created_at ASC",
+                [space_id, *filter_params],
             )
         else:
             cursor = await conn.execute(
-                f"{select_clause} WHERE n.space_id = ? AND n.parent_id = ? ORDER BY n.created_at ASC",
-                (space_id, parent_id),
+                f"{select_clause} WHERE n.space_id = ? AND n.parent_id = ? {filter_clause}ORDER BY n.created_at ASC",
+                [space_id, parent_id, *filter_params],
             )
         rows = await cursor.fetchall()
         await cursor.close()
-        return [_row_to_note(row) for row in rows]
+        notes = [_row_to_note(row) for row in rows]
+        return await self._attach_tags_to_notes(conn, notes)
 
-    async def search_notes(self, space_id: str, query: str) -> list[Note]:
+    async def search_notes(
+        self, space_id: str, query: str, tags: Optional[list[str]] = None
+    ) -> list[Note]:
         conn = await self._ensure_conn()
         select_clause = (
             "SELECT n.id, n.parent_id, n.text, n.created_at, "
@@ -309,15 +540,33 @@ class NoteStore:
             "FROM notes n"
         )
         normalized = query.strip().lower()
+        normalized_tags = _normalize_tags(tags)
+        filter_clause = ""
+        filter_params: list[str | int] = []
+        if normalized_tags:
+            placeholders = ",".join("?" for _ in normalized_tags)
+            filter_clause = (
+                "AND n.id IN ("
+                "SELECT nt.note_id "
+                "FROM note_tags nt "
+                "JOIN tags t ON t.id = nt.tag_id "
+                f"WHERE t.space_id = ? AND t.name IN ({placeholders}) "
+                "GROUP BY nt.note_id "
+                "HAVING COUNT(DISTINCT t.name) = ?"
+                ") "
+            )
+            filter_params = [space_id, *normalized_tags, len(normalized_tags)]
         cursor = await conn.execute(
             f"{select_clause} "
             "WHERE n.space_id = ? AND LOWER(n.text) LIKE ? "
+            f"{filter_clause}"
             "ORDER BY n.created_at ASC",
-            (space_id, f"%{normalized}%"),
+            [space_id, f"%{normalized}%", *filter_params],
         )
         rows = await cursor.fetchall()
         await cursor.close()
-        return [_row_to_note(row) for row in rows]
+        notes = [_row_to_note(row) for row in rows]
+        return await self._attach_tags_to_notes(conn, notes)
 
     async def get(self, note_id: str, space_id: Optional[str] = None) -> Optional[Note]:
         conn = await self._ensure_conn()
@@ -333,7 +582,10 @@ class NoteStore:
         cursor = await conn.execute(query, params)
         row = await cursor.fetchone()
         await cursor.close()
-        return _row_to_note(row) if row else None
+        if row is None:
+            return None
+        notes = await self._attach_tags_to_notes(conn, [_row_to_note(row)])
+        return notes[0]
 
     async def ancestors(self, note_id: str, space_id: str) -> list[Note]:
         """Return ancestors ordered from root to immediate parent."""
@@ -359,9 +611,16 @@ class NoteStore:
         rows = await cursor.fetchall()
         await cursor.close()
         # CTE walks parent -> grandparent -> ...; reverse for root-first.
-        return [_row_to_note(row) for row in reversed(rows)]
+        notes = [_row_to_note(row) for row in reversed(rows)]
+        return await self._attach_tags_to_notes(conn, notes)
 
-    async def create(self, text: str, parent_id: Optional[str], space_id: str) -> Note:
+    async def create(
+        self,
+        text: str,
+        parent_id: Optional[str],
+        space_id: str,
+        tags: Optional[list[str]] = None,
+    ) -> Note:
         # Make sure the schema/WAL/PRAGMAs have been initialized (this is a
         # no-op once the read connection has been opened).
         await self._ensure_conn()
@@ -397,14 +656,25 @@ class NoteStore:
                     "VALUES (?, ?, ?, ?, ?)",
                     (note.id, note.spaceId, note.parentId, note.text, note.createdAt),
                 )
+                effective_tags = _normalize_tags(tags)
+                if tags is None:
+                    effective_tags = _extract_text_tags(text)
+                await self._replace_note_tags(conn, note.id, space_id, effective_tags)
             except BaseException:
                 await conn.execute("ROLLBACK")
                 raise
             await conn.execute("COMMIT")
-        return note
+        created = await self.get(note.id, space_id=space_id)
+        if created is None:
+            return note
+        return created
 
     async def update_text(
-        self, note_id: str, text: str, space_id: Optional[str] = None
+        self,
+        note_id: str,
+        text: str,
+        space_id: Optional[str] = None,
+        tags: Optional[list[str]] = None,
     ) -> Optional[Note]:
         # Make sure schema/WAL/PRAGMAs are initialized before write connection.
         await self._ensure_conn()
@@ -430,6 +700,27 @@ class NoteStore:
                 if updated_rows == 0:
                     await conn.execute("ROLLBACK")
                     return None
+                resolved_space_id = space_id
+                if resolved_space_id is None:
+                    space_cursor = await conn.execute(
+                        "SELECT space_id FROM notes WHERE id = ?",
+                        (note_id,),
+                    )
+                    space_row = await space_cursor.fetchone()
+                    await space_cursor.close()
+                    if space_row is None:
+                        await conn.execute("ROLLBACK")
+                        return None
+                    resolved_space_id = space_row["space_id"]
+                effective_tags = _normalize_tags(tags)
+                if tags is None:
+                    effective_tags = _extract_text_tags(text)
+                await self._replace_note_tags(
+                    conn,
+                    note_id=note_id,
+                    space_id=resolved_space_id,
+                    tags=effective_tags,
+                )
             except BaseException:
                 await conn.execute("ROLLBACK")
                 raise

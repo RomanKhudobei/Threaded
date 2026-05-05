@@ -12,6 +12,7 @@ Endpoints:
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -20,7 +21,7 @@ from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .store import DEFAULT_SPACE_ID, Note, NoteStore, Space
+from .store import DEFAULT_SPACE_ID, Note, NoteStore, Space, Tag
 
 DATABASE_PATH = Path(
     os.environ.get(
@@ -32,6 +33,7 @@ DATABASE_PATH = Path(
 # Default page size for the ancestor breadcrumb. Newest ancestors win when
 # the chain is longer than this so the user can keep stepping upward.
 ANCESTOR_PAGE_SIZE = 5
+_TAG_FRAGMENT_RE = re.compile(r"#(\w+)")
 
 
 app = FastAPI(title="Threaded API", version="0.1.0")
@@ -58,6 +60,7 @@ class NoteOut(BaseModel):
     text: str
     createdAt: str
     childCount: int = 0
+    tags: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_note(cls, note: Note) -> "NoteOut":
@@ -68,6 +71,7 @@ class NoteOut(BaseModel):
             text=note.text,
             createdAt=note.createdAt,
             childCount=note.childCount,
+            tags=note.tags or [],
         )
 
 
@@ -75,10 +79,21 @@ class CreateNoteIn(BaseModel):
     text: str = Field(..., min_length=1, max_length=10_000)
     spaceId: str = Field(..., min_length=1, max_length=255)
     parentId: Optional[str] = None
+    tags: Optional[list[str]] = None
 
 
 class UpdateNoteIn(BaseModel):
     text: str = Field(..., min_length=1, max_length=10_000)
+    tags: Optional[list[str]] = None
+
+
+class TagOut(BaseModel):
+    name: str
+    count: int
+
+    @classmethod
+    def from_tag(cls, tag: Tag) -> "TagOut":
+        return cls(name=tag.name, count=tag.noteCount)
 
 
 class SpaceOut(BaseModel):
@@ -132,6 +147,42 @@ def _normalize_space_name(name: str) -> str:
     if not cleaned:
         raise HTTPException(status_code=400, detail="Space name cannot be empty")
     return cleaned
+
+
+def _extract_text_tags(text: str) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+    for match in _TAG_FRAGMENT_RE.finditer(text):
+        tag = match.group(1).lower()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        tags.append(tag)
+    return tags
+
+
+def _normalize_tags(tags: Optional[list[str]]) -> list[str]:
+    if tags is None:
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_tag in tags:
+        cleaned = raw_tag.strip().lstrip("#").lower()
+        if not cleaned:
+            continue
+        if not cleaned.replace("_", "").isalnum():
+            continue
+        if cleaned in seen:
+            continue
+        seen.add(cleaned)
+        normalized.append(cleaned)
+    return normalized
+
+
+def _resolve_tags(explicit_tags: Optional[list[str]], text: str) -> list[str]:
+    if explicit_tags is None:
+        return _extract_text_tags(text)
+    return _normalize_tags(explicit_tags)
 
 
 @app.get("/api/health")
@@ -191,6 +242,7 @@ async def delete_space(space_id: str) -> Response:
 async def list_notes(
     spaceId: str = Query(..., min_length=1),
     parentId: Optional[str] = Query(default=None),
+    tag: list[str] = Query(default=[]),
 ) -> list[NoteOut]:
     space = _normalize_space_id(spaceId)
     if await store.get_space(space) is None:
@@ -199,7 +251,7 @@ async def list_notes(
     if parent is not None:
         if await store.get(parent, space_id=space) is None:
             raise HTTPException(status_code=404, detail="Parent note not found")
-    children = await store.list_children(space, parent)
+    children = await store.list_children(space, parent, tags=tag)
     return [NoteOut.from_note(n) for n in children]
 
 
@@ -207,6 +259,7 @@ async def list_notes(
 async def search_notes(
     spaceId: str = Query(..., min_length=1),
     query: str = Query(..., min_length=1, max_length=500),
+    tag: list[str] = Query(default=[]),
 ) -> list[NoteOut]:
     space = _normalize_space_id(spaceId)
     if await store.get_space(space) is None:
@@ -214,8 +267,17 @@ async def search_notes(
     text_query = " ".join(query.split()).strip()
     if not text_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
-    matches = await store.search_notes(space_id=space, query=text_query)
+    matches = await store.search_notes(space_id=space, query=text_query, tags=tag)
     return [NoteOut.from_note(note) for note in matches]
+
+
+@app.get("/api/tags", response_model=list[TagOut])
+async def list_tags(spaceId: str = Query(..., min_length=1)) -> list[TagOut]:
+    space = _normalize_space_id(spaceId)
+    if await store.get_space(space) is None:
+        raise HTTPException(status_code=404, detail="Space not found")
+    tags = await store.list_tags(space_id=space)
+    return [TagOut.from_tag(tag) for tag in tags]
 
 
 @app.get("/api/notes/{note_id}/thread", response_model=ThreadView)
@@ -255,8 +317,14 @@ async def create_note(payload: CreateNoteIn) -> NoteOut:
     if await store.get_space(space) is None:
         raise HTTPException(status_code=404, detail="Space not found")
     parent_id = _normalize_parent_id(payload.parentId)
+    tags = _resolve_tags(payload.tags, text)
     try:
-        note = await store.create(text=text, parent_id=parent_id, space_id=space)
+        note = await store.create(
+            text=text,
+            parent_id=parent_id,
+            space_id=space,
+            tags=tags,
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="Parent note not found")
     return NoteOut.from_note(note)
@@ -272,7 +340,13 @@ async def update_note(
     space = _normalize_space_id(spaceId)
     if await store.get_space(space) is None:
         raise HTTPException(status_code=404, detail="Space not found")
-    note = await store.update_text(note_id=note_id, text=text, space_id=space)
+    tags = _resolve_tags(payload.tags, text)
+    note = await store.update_text(
+        note_id=note_id,
+        text=text,
+        space_id=space,
+        tags=tags,
+    )
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
     return NoteOut.from_note(note)
