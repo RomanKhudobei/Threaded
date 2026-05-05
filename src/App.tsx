@@ -51,7 +51,7 @@ type SpaceModalState =
   | { kind: "delete"; spaceId: string }
   | null;
 
-const API_BASE = "/api";
+const API_BASE = import.meta.env.VITE_API_TARGET ?? "/api";
 const SPACE_ROUTE_PREFIX = "/space/";
 const THREAD_ROUTE_PREFIX = "/thread/";
 
@@ -138,14 +138,14 @@ function buildTagsQuery(tags: string[]): string {
 }
 
 const api = {
-  listSpaces: () => http<Space[]>("/spaces"),
+  listSpaces: () => http<Space[]>(`${API_BASE}/spaces`),
   createSpace: (name: string) =>
-    http<Space>("/spaces", {
+    http<Space>(`${API_BASE}/spaces`, {
       method: "POST",
       body: JSON.stringify({ name }),
     }),
   updateSpace: (id: string, name: string) =>
-    http<Space>(`/spaces/${encodeURIComponent(id)}`, {
+    http<Space>(`${API_BASE}/spaces/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify({ name }),
     }),
@@ -167,21 +167,21 @@ const api = {
   },
   listRoots: (spaceId: string, tags: string[] = []) =>
     http<Note[]>(
-      `/notes?spaceId=${encodeURIComponent(spaceId)}${buildTagsQuery(tags)}`,
+      `${API_BASE}/notes?spaceId=${encodeURIComponent(spaceId)}${buildTagsQuery(tags)}`,
     ),
   searchNotes: (spaceId: string, query: string, tags: string[] = []) =>
     http<Note[]>(
-      `/notes/search?spaceId=${encodeURIComponent(spaceId)}&query=${encodeURIComponent(query)}${buildTagsQuery(tags)}`,
+      `${API_BASE}/notes/search?spaceId=${encodeURIComponent(spaceId)}&query=${encodeURIComponent(query)}${buildTagsQuery(tags)}`,
     ),
   listTags: (spaceId: string) =>
-    http<TagStat[]>(`/tags?spaceId=${encodeURIComponent(spaceId)}`),
+    http<TagStat[]>(`${API_BASE}/tags?spaceId=${encodeURIComponent(spaceId)}`),
   listByParent: (spaceId: string, parentId: string) =>
     http<Note[]>(
-      `/notes?spaceId=${encodeURIComponent(spaceId)}&parentId=${encodeURIComponent(parentId)}`,
+      `${API_BASE}/notes?spaceId=${encodeURIComponent(spaceId)}&parentId=${encodeURIComponent(parentId)}`,
     ),
   getThread: (spaceId: string, id: string) =>
     http<ThreadView>(
-      `/notes/${encodeURIComponent(id)}/thread?spaceId=${encodeURIComponent(spaceId)}`,
+      `${API_BASE}/notes/${encodeURIComponent(id)}/thread?spaceId=${encodeURIComponent(spaceId)}`,
     ),
   createNote: (
     spaceId: string,
@@ -189,12 +189,12 @@ const api = {
     parentId: string | null,
     tags: string[],
   ) =>
-    http<Note>("/notes", {
+    http<Note>("${API_BASE}/notes", {
       method: "POST",
       body: JSON.stringify({ text, parentId, spaceId, tags: normalizeTags(tags) }),
     }),
   updateNote: (spaceId: string, id: string, text: string, tags: string[]) =>
-    http<Note>(`/notes/${encodeURIComponent(id)}?spaceId=${encodeURIComponent(spaceId)}`, {
+    http<Note>(`${API_BASE}/notes/${encodeURIComponent(id)}?spaceId=${encodeURIComponent(spaceId)}`, {
       method: "PATCH",
       body: JSON.stringify({ text, tags: normalizeTags(tags) }),
     }),
