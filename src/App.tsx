@@ -2488,7 +2488,7 @@ export default function App(): ReactNode {
 
         // Keep expanded descendants in sync when they are not in local thread state.
         void refreshTags(currentSpaceId);
-        if (view.kind === "root") void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
+        if (view.kind === "root") void refreshRoots(currentSpaceId, debouncedQuery, selectedTags, dateRange);
         else void refreshThread(currentSpaceId, view.noteId);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Could not update note";
@@ -2499,6 +2499,7 @@ export default function App(): ReactNode {
     [
       view,
       debouncedQuery,
+      dateRange,
       refreshRoots,
       refreshThread,
       refreshTags,
@@ -2534,19 +2535,19 @@ export default function App(): ReactNode {
           void refreshThread(currentSpaceId, note.parentId);
         } else {
           navigateToView({ kind: "root", spaceId: currentSpaceId });
-          void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
+          void refreshRoots(currentSpaceId, debouncedQuery, selectedTags, dateRange);
         }
         return;
       }
 
       if (deletedAncestor) {
         navigateToView({ kind: "root", spaceId: currentSpaceId });
-        void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
+        void refreshRoots(currentSpaceId, debouncedQuery, selectedTags, dateRange);
         return;
       }
 
       if (view.kind === "root") {
-        void refreshRoots(currentSpaceId, debouncedQuery, selectedTags);
+        void refreshRoots(currentSpaceId, debouncedQuery, selectedTags, dateRange);
       } else {
         void refreshThread(currentSpaceId, view.noteId);
       }
@@ -2555,6 +2556,7 @@ export default function App(): ReactNode {
       view,
       thread,
       debouncedQuery,
+      dateRange,
       navigateToView,
       refreshRoots,
       refreshThread,
@@ -2758,6 +2760,7 @@ export default function App(): ReactNode {
             thread={thread}
             query={query}
             selectedTags={selectedTags}
+            dateRange={dateRange}
             onClearFilters={() => {
               setQuery("");
               setSelectedTags([]);

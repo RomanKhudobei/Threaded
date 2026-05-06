@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="75%">
+      <stop offset="0%" stop-color="#1d1d26"/>
+      <stop offset="100%" stop-color="#16161a"/>
+    </radialGradient>
+    <linearGradient id="bar-a" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#b0b0ad"/>
+      <stop offset="100%" stop-color="#58585a"/>
+    </linearGradient>
+    <linearGradient id="bar-b" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a3a43"/>
+      <stop offset="100%" stop-color="#2c2c33"/>
+    </linearGradient>
+    <clipPath id="win-clip">
+      <rect x="64" y="188" width="952" height="648" rx="18"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1080" height="1080" fill="#16161a"/>
+  <rect width="1080" height="1080" fill="url(#bg)"/>
+
+  <!-- Ghost decorative marks - corners -->
+  <g opacity="0.04">
+    <rect x="-40" y="56"  width="220" height="14" rx="7" fill="#ececea"/>
+    <rect x="26"  y="88"  width="154" height="14" rx="7" fill="#ececea"/>
+    <rect x="90"  y="120" width="90"  height="14" rx="7" fill="#ececea"/>
+  </g>
+  <g opacity="0.04">
+    <rect x="900" y="946" width="220" height="14" rx="7" fill="#ececea"/>
+    <rect x="966" y="978" width="154" height="14" rx="7" fill="#ececea"/>
+    <rect x="1030" y="1010" width="90" height="14" rx="7" fill="#ececea"/>
+  </g>
+
+  <!-- Headline above window -->
+  <text
+    x="540" y="118"
+    font-family="'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
+    font-size="22" font-weight="500" letter-spacing="-0.2"
+    fill="#58585a" text-anchor="middle">Meet</text>
+  <text
+    x="540" y="165"
+    font-family="'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
+    font-size="58" font-weight="700" letter-spacing="-2.5"
+    fill="#ececea" text-anchor="middle">Write. Thread. Think deeper.</text>
+
+  <!-- ═══════════════════════════════════════════════════
+       App Window  x=64 y=188 w=952 h=648 rx=18
+       Sidebar:    x=64  → x=268  (204px)
+       Content:    x=268 → x=1016 (748px)
+       Window bottom: y=836
+       ═══════════════════════════════════════════════════ -->
+
+  <!-- Window base (shadow effect) -->
+  <rect x="60" y="194" width="952" height="648" rx="18" fill="#0a0a0e" opacity="0.6"/>
+
+  <!-- Window background -->
+  <rect x="64" y="188" width="952" height="648" rx="18" fill="#1f1f24" stroke="#2c2c33" stroke-width="1"/>
+
+  <!-- Sidebar background (clipped) -->
+  <rect x="64" y="188" width="204" height="648" fill="#1a1a1f" clip-path="url(#win-clip)"/>
+
+  <!-- Sidebar / content divider -->
+  <line x1="268" y1="188" x2="268" y2="836" stroke="#2c2c33" stroke-width="1"/>
+
+  <!-- Topbar divider (full width) -->
+  <line x1="64" y1="240" x2="1016" y2="240" stroke="#2c2c33" stroke-width="1"/>
+
+  <!-- ── Sidebar topbar: brand mark + "Threaded" ── -->
+  <!--
+    Brand mark 20px wide in sidebar topbar
+    scale=20/18=1.111: h=2.2≈2, gap=3.3≈4
+    line-2: x=6, w=14   line-3: x=11.7≈12, w=8.3≈8
+    total h=14
+    translate: (86, 206)
+  -->
+  <g transform="translate(86, 206)">
+    <rect x="0"  y="0"  width="20" height="2" rx="1" fill="#ececea" opacity="0.9"/>
+    <rect x="6"  y="6"  width="14" height="2" rx="1" fill="#ececea" opacity="0.62"/>
+    <rect x="12" y="12" width="8"  height="2" rx="1" fill="#ececea" opacity="0.38"/>
+  </g>
+  <text
+    x="114" y="222"
+    font-family="'Inter', system-ui, sans-serif"
+    font-size="13" font-weight="600" letter-spacing="-0.3"
+    fill="#ececea">Threaded</text>
+
+  <!-- ── Content topbar: title + icons ── -->
+  <text
+    x="291" y="221"
+    font-family="'Inter', system-ui, sans-serif"
+    font-size="13.5" font-weight="600" letter-spacing="-0.2"
+    fill="#ececea">Thoughts</text>
+
+  <!-- Topbar right icons (placeholder dots) -->
+  <circle cx="960" cy="214" r="9" fill="#25252b" stroke="#3a3a43" stroke-width="1"/>
+  <circle cx="985" cy="214" r="9" fill="#25252b" stroke="#3a3a43" stroke-width="1"/>
+
+  <!-- ═══════════════════════════════════
+       SIDEBAR: 3 thread items
+       Start y=252, item-h=58, gap=8
+       Item 1: y=252 (active)
+       Item 2: y=318
+       Item 3: y=384
+       ═══════════════════════════════════ -->
+
+  <!-- Item 1 — active -->
+  <rect x="72" y="252" width="188" height="58" rx="9" fill="#252528" stroke="#3a3a43" stroke-width="1"/>
+  <rect x="76" y="261" width="2" height="38" rx="1" fill="url(#bar-a)"/>
+  <!-- preview lines -->
+  <rect x="85" y="264" width="130" height="7" rx="3" fill="#7e7e7c"/>
+  <rect x="85" y="277" width="104" height="7" rx="3" fill="#7e7e7c"/>
+  <!-- tag chip -->
+  <rect x="85" y="293" width="44" height="12" rx="6" fill="#2c2c33" stroke="#3a3a43" stroke-width="1"/>
+  <text x="107" y="302" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" fill="#7e7e7c" text-anchor="middle">#ideas</text>
+  <!-- timestamp -->
+  <text x="250" y="302" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" fill="#58585a" text-anchor="end">Today</text>
+
+  <!-- Item 2 -->
+  <rect x="72" y="318" width="188" height="58" rx="9" fill="transparent"/>
+  <rect x="85" y="328" width="140" height="7" rx="3" fill="#3a3a43"/>
+  <rect x="85" y="341" width="110" height="7" rx="3" fill="#3a3a43"/>
+  <rect x="85" y="357" width="44" height="12" rx="6" fill="#25252b" stroke="#2c2c33" stroke-width="1"/>
+  <text x="107" y="366" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" fill="#58585a" text-anchor="middle">#work</text>
+  <text x="250" y="366" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" fill="#3a3a43" text-anchor="end">Tue</text>
+
+  <!-- Item 3 -->
+  <rect x="72" y="384" width="188" height="58" rx="9" fill="transparent"/>
+  <rect x="85" y="394" width="120" height="7" rx="3" fill="#3a3a43"/>
+  <rect x="85" y="407" width="88" height="7" rx="3" fill="#3a3a43"/>
+  <rect x="85" y="423" width="52" height="12" rx="6" fill="#25252b" stroke="#2c2c33" stroke-width="1"/>
+  <text x="111" y="432" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" fill="#58585a" text-anchor="middle">#design</text>
+  <text x="250" y="432" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="8.5" fill="#3a3a43" text-anchor="end">Mon</text>
+
+  <!-- Sidebar space label -->
+  <text x="85" y="480" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="9" fill="#3a3a43" letter-spacing="0.08em">SPACES</text>
+  <!-- Space selector mock -->
+  <rect x="72" y="488" width="188" height="32" rx="8" fill="#25252b" stroke="#2c2c33" stroke-width="1"/>
+  <text x="88" y="508" font-family="'Inter', system-ui, sans-serif" font-size="12" fill="#7e7e7c">Personal</text>
+  <text x="248" y="508" font-family="'Inter', system-ui, sans-serif" font-size="12" fill="#3a3a43" text-anchor="end">›</text>
+
+  <!-- ═══════════════════════════════════════
+       CONTENT AREA
+       Padding: 22px from left (x=290)
+       Card width: 700px
+       ═══════════════════════════════════════ -->
+
+  <!-- ROOT CARD: x=290, y=255, w=700, h=148 -->
+  <rect x="290" y="255" width="700" height="148" rx="12" fill="#25252b" stroke="#3a3a43" stroke-width="1"/>
+  <!-- Card text (fake lines — varied widths for realism) -->
+  <rect x="312" y="278" width="520" height="9" rx="4" fill="#7e7e7c"/>
+  <rect x="312" y="295" width="474" height="9" rx="4" fill="#7e7e7c"/>
+  <rect x="312" y="312" width="356" height="9" rx="4" fill="#7e7e7c"/>
+  <!-- Tags -->
+  <rect x="312" y="334" width="52" height="16" rx="8" fill="#2c2c33" stroke="#3a3a43" stroke-width="1"/>
+  <text x="338" y="345" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="9.5" fill="#7e7e7c" text-anchor="middle">#ideas</text>
+  <rect x="370" y="334" width="58" height="16" rx="8" fill="#2c2c33" stroke="#3a3a43" stroke-width="1"/>
+  <text x="399" y="345" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="9.5" fill="#7e7e7c" text-anchor="middle">#landing</text>
+  <!-- Meta bar -->
+  <line x1="312" y1="360" x2="990" y2="360" stroke="#2c2c33" stroke-width="1" stroke-dasharray="2 3"/>
+  <text x="312" y="378" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="9.5" fill="#58585a">2026-05-07 · 14:32</text>
+  <!-- Reply count badge -->
+  <rect x="868" y="366" width="62" height="18" rx="9" fill="#25252b" stroke="#3a3a43" stroke-width="1"/>
+  <text x="899" y="378" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="9.5" fill="#7e7e7c" text-anchor="middle">2 replies</text>
+
+  <!-- Thread branch line: root → reply -->
+  <line x1="316" y1="403" x2="316" y2="425" stroke="#3a3a43" stroke-width="1" stroke-dasharray="3 3"/>
+
+  <!-- REPLY CARD: x=316, y=425, w=674, h=122 -->
+  <rect x="316" y="425" width="674" height="122" rx="12" fill="#252528" stroke="#3a3a43" stroke-width="1"/>
+  <rect x="336" y="446" width="480" height="8" rx="3.5" fill="#5b5b58"/>
+  <rect x="336" y="462" width="400" height="8" rx="3.5" fill="#5b5b58"/>
+  <!-- Tag -->
+  <rect x="336" y="482" width="46" height="14" rx="7" fill="#2c2c33" stroke="#3a3a43" stroke-width="1"/>
+  <text x="359" y="492" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="9" fill="#58585a" text-anchor="middle">#ux</text>
+  <!-- Meta -->
+  <line x1="336" y1="506" x2="990" y2="506" stroke="#2c2c33" stroke-width="1" stroke-dasharray="2 3"/>
+  <text x="336" y="522" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="9.5" fill="#3a3a43">2026-05-07 · 15:10</text>
+  <rect x="896" y="511" width="50" height="16" rx="8" fill="#25252b" stroke="#3a3a43" stroke-width="1"/>
+  <text x="921" y="522" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="9.5" fill="#58585a" text-anchor="middle">1 reply</text>
+
+  <!-- Thread branch line: reply → nested -->
+  <line x1="342" y1="547" x2="342" y2="566" stroke="#3a3a43" stroke-width="1" stroke-dasharray="3 3"/>
+
+  <!-- NESTED CARD: x=342, y=566, w=648, h=100 -->
+  <rect x="342" y="566" width="648" height="100" rx="12" fill="#222227" stroke="#2c2c33" stroke-width="1"/>
+  <rect x="362" y="586" width="440" height="8" rx="3.5" fill="#3a3a43"/>
+  <rect x="362" y="602" width="300" height="8" rx="3.5" fill="#3a3a43"/>
+  <!-- Meta -->
+  <line x1="362" y1="624" x2="990" y2="624" stroke="#25252b" stroke-width="1" stroke-dasharray="2 3"/>
+  <text x="362" y="639" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="9.5" fill="#2c2c33">2026-05-07 · 15:44</text>
+
+  <!-- Composer at bottom -->
+  <rect x="290" y="702" width="700" height="50" rx="11" fill="#1d1d22" stroke="#2c2c33" stroke-width="1"/>
+  <text x="312" y="731" font-family="'Inter', system-ui, sans-serif" font-size="13" fill="#3a3a43">Add a thought…</text>
+  <!-- Composer submit button -->
+  <rect x="940" y="715" width="38" height="24" rx="6" fill="#2c2c33"/>
+  <text x="959" y="731" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="9" fill="#58585a" text-anchor="middle">↵</text>
+
+  <!-- ── Footer below window ── -->
+  <!--
+    Brand mark 24px wide
+    scale = 24/18 = 1.333
+    line-h = 2.67≈3, gap = 4
+    line-2: x=7.2≈7, w=16.8≈17
+    line-3: x=14, w=10
+    total h = 17
+    Center at 540: start at 540-12=528
+  -->
+  <g transform="translate(528, 888)">
+    <rect x="0"  y="0"  width="24" height="3" rx="1.5" fill="#3a3a43" opacity="0.9"/>
+    <rect x="7"  y="8"  width="17" height="3" rx="1.5" fill="#3a3a43" opacity="0.65"/>
+    <rect x="14" y="16" width="10" height="3" rx="1.5" fill="#3a3a43" opacity="0.4"/>
+  </g>
+  <text
+    x="540" y="930"
+    font-family="'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
+    font-size="16" font-weight="600" letter-spacing="-0.3"
+    fill="#3a3a43" text-anchor="middle">Threaded</text>
+  <text
+    x="540" y="957"
+    font-family="'JetBrains Mono', ui-monospace, monospace"
+    font-size="12" letter-spacing="0.04em"
+    fill="#2c2c33" text-anchor="middle">threaded.app</text>
+
+</svg>
