@@ -17,11 +17,24 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Response
+import httpx
+from authlib.integrations.httpx_client import AsyncOAuth2Client
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from .store import DEFAULT_SPACE_ID, Note, NoteStore, Space, Tag
+from . import auth as auth_module
+from .auth import (
+    COOKIE_NAME,
+    OAUTH_STATE_COOKIE,
+    create_jwt,
+    create_state_token,
+    decode_jwt,
+    get_current_user,
+    _is_secure,
+)
+from .store import Note, NoteStore, Space, Tag, User
 
 DATABASE_PATH = Path(
     os.environ.get(
@@ -29,6 +42,14 @@ DATABASE_PATH = Path(
         str(Path(__file__).resolve().parent / "data" / "threaded.sqlite3"),
     )
 )
+
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8080").rstrip("/")
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = f"{APP_BASE_URL}/api/auth/google/callback"
+GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 # Default page size for the ancestor breadcrumb. Newest ancestors win when
 # the chain is longer than this so the user can keep stepping upward.
@@ -40,12 +61,14 @@ app = FastAPI(title="Threaded API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[APP_BASE_URL],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 store = NoteStore(DATABASE_PATH)
+auth_module.init(store)
 
 
 @app.on_event("shutdown")
@@ -126,6 +149,22 @@ class ThreadView(BaseModel):
     totalAncestors: int
 
 
+class UserOut(BaseModel):
+    id: str
+    email: str
+    displayName: Optional[str]
+    avatarUrl: Optional[str]
+
+    @classmethod
+    def from_user(cls, user: User) -> "UserOut":
+        return cls(
+            id=user.id,
+            email=user.email,
+            displayName=user.displayName,
+            avatarUrl=user.avatarUrl,
+        )
+
+
 def _normalize_parent_id(parent_id: Optional[str]) -> Optional[str]:
     if parent_id is None:
         return None
@@ -185,32 +224,151 @@ def _resolve_tags(explicit_tags: Optional[list[str]], text: str) -> list[str]:
     return _normalize_tags(explicit_tags)
 
 
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/auth/google/login")
+async def google_login(request: Request, response: Response) -> RedirectResponse:
+    state = create_state_token()
+    redirect = RedirectResponse(
+        url=(
+            f"{GOOGLE_AUTHORIZE_URL}"
+            f"?client_id={GOOGLE_CLIENT_ID}"
+            f"&redirect_uri={GOOGLE_REDIRECT_URI}"
+            f"&response_type=code"
+            f"&scope=openid+email+profile"
+            f"&state={state}"
+            f"&access_type=offline"
+        )
+    )
+    redirect.set_cookie(
+        key=OAUTH_STATE_COOKIE,
+        value=state,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure(request),
+        max_age=600,
+        path="/",
+    )
+    return redirect
+
+
+@app.get("/api/auth/google/callback")
+async def google_callback(
+    request: Request,
+    code: str = Query(...),
+    state: str = Query(...),
+) -> RedirectResponse:
+    stored_state = request.cookies.get(OAUTH_STATE_COOKIE)
+    if not stored_state or stored_state != state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    try:
+        decode_jwt(state)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Expired OAuth state")
+
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(
+            GOOGLE_TOKEN_URL,
+            data={
+                "code": code,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri": GOOGLE_REDIRECT_URI,
+                "grant_type": "authorization_code",
+            },
+        )
+    if token_resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to exchange OAuth code")
+
+    access_token = token_resp.json().get("access_token")
+    async with httpx.AsyncClient() as client:
+        info_resp = await client.get(
+            GOOGLE_USERINFO_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    if info_resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to fetch Google user info")
+
+    info = info_resp.json()
+    user = await store.upsert_user(
+        google_sub=info["id"],
+        email=info["email"],
+        display_name=info.get("name"),
+        avatar_url=info.get("picture"),
+    )
+
+    jwt_token = create_jwt(user.id)
+    redirect = RedirectResponse(url="/", status_code=302)
+    redirect.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+    redirect.set_cookie(
+        key=COOKIE_NAME,
+        value=jwt_token,
+        httponly=True,
+        samesite="lax",
+        secure=_is_secure(request),
+        max_age=auth_module.JWT_MAX_AGE,
+        path="/",
+    )
+    return redirect
+
+
+@app.get("/api/auth/me", response_model=UserOut)
+async def auth_me(current_user: User = Depends(get_current_user)) -> UserOut:
+    return UserOut.from_user(current_user)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request) -> dict:
+    resp = Response(content='{"ok":true}', media_type="application/json")
+    resp.delete_cookie(COOKIE_NAME, path="/", samesite="lax", httponly=True)
+    return Response(
+        content='{"ok":true}',
+        media_type="application/json",
+        headers={"Set-Cookie": f"{COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Core API
+# ---------------------------------------------------------------------------
+
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok"}
 
 
 @app.get("/api/spaces", response_model=list[SpaceOut])
-async def list_spaces() -> list[SpaceOut]:
-    spaces = await store.list_spaces()
+async def list_spaces(current_user: User = Depends(get_current_user)) -> list[SpaceOut]:
+    spaces = await store.list_spaces(user_id=current_user.id)
     return [SpaceOut.from_space(space) for space in spaces]
 
 
 @app.post("/api/spaces", response_model=SpaceOut, status_code=201)
-async def create_space(payload: CreateSpaceIn) -> SpaceOut:
+async def create_space(
+    payload: CreateSpaceIn,
+    current_user: User = Depends(get_current_user),
+) -> SpaceOut:
     name = _normalize_space_name(payload.name)
     try:
-        space = await store.create_space(name)
+        space = await store.create_space(name, user_id=current_user.id)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="Space name already exists")
     return SpaceOut.from_space(space)
 
 
 @app.patch("/api/spaces/{space_id}", response_model=SpaceOut)
-async def update_space(space_id: str, payload: UpdateSpaceIn) -> SpaceOut:
+async def update_space(
+    space_id: str,
+    payload: UpdateSpaceIn,
+    current_user: User = Depends(get_current_user),
+) -> SpaceOut:
     name = _normalize_space_name(payload.name)
     try:
-        space = await store.update_space_name(space_id=space_id, name=name)
+        space = await store.update_space_name(
+            space_id=space_id, name=name, user_id=current_user.id
+        )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="Space name already exists")
     if space is None:
@@ -219,20 +377,17 @@ async def update_space(space_id: str, payload: UpdateSpaceIn) -> SpaceOut:
 
 
 @app.delete("/api/spaces/{space_id}", status_code=204, response_class=Response)
-async def delete_space(space_id: str) -> Response:
-    spaces = await store.list_spaces()
+async def delete_space(
+    space_id: str,
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    spaces = await store.list_spaces(user_id=current_user.id)
     if len(spaces) <= 1:
         raise HTTPException(
             status_code=400,
             detail="At least one space must remain",
         )
-    if space_id == DEFAULT_SPACE_ID and len(spaces) > 1:
-        # Keep default space stable for legacy links and startup backfills.
-        raise HTTPException(
-            status_code=400,
-            detail="Default space cannot be deleted",
-        )
-    deleted = await store.delete_space(space_id=space_id)
+    deleted = await store.delete_space(space_id=space_id, user_id=current_user.id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Space not found")
     return Response(status_code=204)
@@ -245,9 +400,10 @@ async def list_notes(
     tag: list[str] = Query(default=[]),
     dateFrom: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     dateTo: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    current_user: User = Depends(get_current_user),
 ) -> list[NoteOut]:
     space = _normalize_space_id(spaceId)
-    if await store.get_space(space) is None:
+    if await store.get_space(space, user_id=current_user.id) is None:
         raise HTTPException(status_code=404, detail="Space not found")
     parent = _normalize_parent_id(parentId)
     if parent is not None:
@@ -264,9 +420,10 @@ async def search_notes(
     tag: list[str] = Query(default=[]),
     dateFrom: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     dateTo: Optional[str] = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    current_user: User = Depends(get_current_user),
 ) -> list[NoteOut]:
     space = _normalize_space_id(spaceId)
-    if await store.get_space(space) is None:
+    if await store.get_space(space, user_id=current_user.id) is None:
         raise HTTPException(status_code=404, detail="Space not found")
     text_query = " ".join(query.split()).strip()
     if not text_query:
@@ -276,9 +433,12 @@ async def search_notes(
 
 
 @app.get("/api/tags", response_model=list[TagOut])
-async def list_tags(spaceId: str = Query(..., min_length=1)) -> list[TagOut]:
+async def list_tags(
+    spaceId: str = Query(..., min_length=1),
+    current_user: User = Depends(get_current_user),
+) -> list[TagOut]:
     space = _normalize_space_id(spaceId)
-    if await store.get_space(space) is None:
+    if await store.get_space(space, user_id=current_user.id) is None:
         raise HTTPException(status_code=404, detail="Space not found")
     tags = await store.list_tags(space_id=space)
     return [TagOut.from_tag(tag) for tag in tags]
@@ -289,9 +449,10 @@ async def get_thread(
     note_id: str,
     spaceId: str = Query(..., min_length=1),
     ancestorLimit: int = Query(default=ANCESTOR_PAGE_SIZE, ge=1, le=50),
+    current_user: User = Depends(get_current_user),
 ) -> ThreadView:
     space = _normalize_space_id(spaceId)
-    if await store.get_space(space) is None:
+    if await store.get_space(space, user_id=current_user.id) is None:
         raise HTTPException(status_code=404, detail="Space not found")
     note = await store.get(note_id, space_id=space)
     if note is None:
@@ -313,12 +474,15 @@ async def get_thread(
 
 
 @app.post("/api/notes", response_model=NoteOut, status_code=201)
-async def create_note(payload: CreateNoteIn) -> NoteOut:
+async def create_note(
+    payload: CreateNoteIn,
+    current_user: User = Depends(get_current_user),
+) -> NoteOut:
     text = payload.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text cannot be empty")
     space = _normalize_space_id(payload.spaceId)
-    if await store.get_space(space) is None:
+    if await store.get_space(space, user_id=current_user.id) is None:
         raise HTTPException(status_code=404, detail="Space not found")
     parent_id = _normalize_parent_id(payload.parentId)
     tags = _resolve_tags(payload.tags, text)
@@ -336,13 +500,16 @@ async def create_note(payload: CreateNoteIn) -> NoteOut:
 
 @app.patch("/api/notes/{note_id}", response_model=NoteOut)
 async def update_note(
-    note_id: str, payload: UpdateNoteIn, spaceId: str = Query(..., min_length=1)
+    note_id: str,
+    payload: UpdateNoteIn,
+    spaceId: str = Query(..., min_length=1),
+    current_user: User = Depends(get_current_user),
 ) -> NoteOut:
     text = payload.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text cannot be empty")
     space = _normalize_space_id(spaceId)
-    if await store.get_space(space) is None:
+    if await store.get_space(space, user_id=current_user.id) is None:
         raise HTTPException(status_code=404, detail="Space not found")
     tags = _resolve_tags(payload.tags, text)
     note = await store.update_text(
@@ -358,10 +525,12 @@ async def update_note(
 
 @app.delete("/api/notes/{note_id}", status_code=204, response_class=Response)
 async def delete_note(
-    note_id: str, spaceId: str = Query(..., min_length=1)
+    note_id: str,
+    spaceId: str = Query(..., min_length=1),
+    current_user: User = Depends(get_current_user),
 ) -> Response:
     space = _normalize_space_id(spaceId)
-    if await store.get_space(space) is None:
+    if await store.get_space(space, user_id=current_user.id) is None:
         raise HTTPException(status_code=404, detail="Space not found")
     deleted = await store.delete(note_id=note_id, space_id=space)
     if not deleted:

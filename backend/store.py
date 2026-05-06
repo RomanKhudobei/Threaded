@@ -21,6 +21,17 @@ import aiosqlite
 
 DEFAULT_SPACE_ID = "general"
 DEFAULT_SPACE_NAME = "General"
+LEGACY_USER_ID = "__legacy__"
+
+
+@dataclass
+class User:
+    id: str
+    googleSub: str
+    email: str
+    displayName: Optional[str]
+    avatarUrl: Optional[str]
+    createdAt: str
 
 
 @dataclass
@@ -28,6 +39,7 @@ class Space:
     id: str
     name: str
     createdAt: str
+    userId: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -111,6 +123,15 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
 
 
 _SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    google_sub TEXT UNIQUE NOT NULL,
+    email TEXT NOT NULL,
+    display_name TEXT,
+    avatar_url TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS spaces (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
@@ -168,9 +189,25 @@ def _row_to_note(row: aiosqlite.Row) -> Note:
 
 
 def _row_to_space(row: aiosqlite.Row) -> Space:
+    try:
+        user_id = row["user_id"] or ""
+    except (IndexError, KeyError):
+        user_id = ""
     return Space(
         id=row["id"],
         name=row["name"],
+        createdAt=row["created_at"],
+        userId=user_id,
+    )
+
+
+def _row_to_user(row: aiosqlite.Row) -> User:
+    return User(
+        id=row["id"],
+        googleSub=row["google_sub"],
+        email=row["email"],
+        displayName=row["display_name"],
+        avatarUrl=row["avatar_url"],
         createdAt=row["created_at"],
     )
 
@@ -274,7 +311,36 @@ class NoteStore:
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id ON note_tags(tag_id)"
         )
+        await self._migrate_users(conn)
         await self._backfill_tags(conn)
+
+    async def _migrate_users(self, conn: aiosqlite.Connection) -> None:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        # Insert legacy sentinel user for data that predates auth.
+        await conn.execute(
+            "INSERT OR IGNORE INTO users (id, google_sub, email, display_name, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (LEGACY_USER_ID, LEGACY_USER_ID, "legacy@localhost", "Legacy", now_iso),
+        )
+        # Add user_id column to spaces if it doesn't exist yet.
+        spaces_cursor = await conn.execute("PRAGMA table_info(spaces)")
+        space_columns = await spaces_cursor.fetchall()
+        await spaces_cursor.close()
+        if not any(col["name"] == "user_id" for col in space_columns):
+            await conn.execute(
+                "ALTER TABLE spaces ADD COLUMN user_id TEXT REFERENCES users(id)"
+            )
+        # Backfill any un-owned spaces to the legacy user.
+        await conn.execute(
+            "UPDATE spaces SET user_id = ? WHERE user_id IS NULL",
+            (LEGACY_USER_ID,),
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_spaces_user_id ON spaces(user_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub)"
+        )
 
     async def _backfill_tags(self, conn: aiosqlite.Connection) -> None:
         cursor = await conn.execute("SELECT id, space_id, text FROM notes")
@@ -373,21 +439,23 @@ class NoteStore:
                 await self._conn.close()
                 self._conn = None
 
-    async def list_spaces(self) -> list[Space]:
+    async def list_spaces(self, user_id: str) -> list[Space]:
         conn = await self._ensure_conn()
         cursor = await conn.execute(
-            "SELECT id, name, created_at FROM spaces ORDER BY created_at ASC"
+            "SELECT id, name, created_at, user_id FROM spaces WHERE user_id = ? ORDER BY created_at ASC",
+            (user_id,),
         )
         rows = await cursor.fetchall()
         await cursor.close()
         return [_row_to_space(row) for row in rows]
 
-    async def create_space(self, name: str) -> Space:
+    async def create_space(self, name: str, user_id: str) -> Space:
         await self._ensure_conn()
         space = Space(
             id=uuid4().hex,
             name=name,
             createdAt=datetime.now(timezone.utc).isoformat(),
+            userId=user_id,
         )
         async with aiosqlite.connect(self._path, isolation_level=None) as conn:
             conn.row_factory = aiosqlite.Row
@@ -396,8 +464,8 @@ class NoteStore:
             await conn.execute("BEGIN IMMEDIATE")
             try:
                 await conn.execute(
-                    "INSERT INTO spaces (id, name, created_at) VALUES (?, ?, ?)",
-                    (space.id, space.name, space.createdAt),
+                    "INSERT INTO spaces (id, name, created_at, user_id) VALUES (?, ?, ?, ?)",
+                    (space.id, space.name, space.createdAt, space.userId),
                 )
             except BaseException:
                 await conn.execute("ROLLBACK")
@@ -405,7 +473,7 @@ class NoteStore:
             await conn.execute("COMMIT")
         return space
 
-    async def update_space_name(self, space_id: str, name: str) -> Optional[Space]:
+    async def update_space_name(self, space_id: str, name: str, user_id: str) -> Optional[Space]:
         await self._ensure_conn()
         async with aiosqlite.connect(self._path, isolation_level=None) as conn:
             conn.row_factory = aiosqlite.Row
@@ -414,8 +482,8 @@ class NoteStore:
             await conn.execute("BEGIN IMMEDIATE")
             try:
                 cursor = await conn.execute(
-                    "UPDATE spaces SET name = ? WHERE id = ?",
-                    (name, space_id),
+                    "UPDATE spaces SET name = ? WHERE id = ? AND user_id = ?",
+                    (name, space_id, user_id),
                 )
                 updated_rows = cursor.rowcount
                 await cursor.close()
@@ -426,9 +494,9 @@ class NoteStore:
                 await conn.execute("ROLLBACK")
                 raise
             await conn.execute("COMMIT")
-        return await self.get_space(space_id)
+        return await self.get_space(space_id, user_id=user_id)
 
-    async def delete_space(self, space_id: str) -> bool:
+    async def delete_space(self, space_id: str, user_id: str) -> bool:
         await self._ensure_conn()
         async with aiosqlite.connect(self._path, isolation_level=None) as conn:
             await conn.execute("PRAGMA foreign_keys=ON")
@@ -436,8 +504,8 @@ class NoteStore:
             await conn.execute("BEGIN IMMEDIATE")
             try:
                 cursor = await conn.execute(
-                    "DELETE FROM spaces WHERE id = ?",
-                    (space_id,),
+                    "DELETE FROM spaces WHERE id = ? AND user_id = ?",
+                    (space_id, user_id),
                 )
                 deleted_rows = cursor.rowcount
                 await cursor.close()
@@ -450,15 +518,70 @@ class NoteStore:
             await conn.execute("COMMIT")
         return True
 
-    async def get_space(self, space_id: str) -> Optional[Space]:
+    async def get_space(self, space_id: str, user_id: Optional[str] = None) -> Optional[Space]:
         conn = await self._ensure_conn()
-        cursor = await conn.execute(
-            "SELECT id, name, created_at FROM spaces WHERE id = ?",
-            (space_id,),
-        )
+        if user_id is not None:
+            cursor = await conn.execute(
+                "SELECT id, name, created_at, user_id FROM spaces WHERE id = ? AND user_id = ?",
+                (space_id, user_id),
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT id, name, created_at, user_id FROM spaces WHERE id = ?",
+                (space_id,),
+            )
         row = await cursor.fetchone()
         await cursor.close()
         return _row_to_space(row) if row else None
+
+    async def upsert_user(
+        self,
+        google_sub: str,
+        email: str,
+        display_name: Optional[str],
+        avatar_url: Optional[str],
+    ) -> User:
+        await self._ensure_conn()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(self._path, isolation_level=None) as conn:
+            conn.row_factory = aiosqlite.Row
+            await conn.execute("PRAGMA foreign_keys=ON")
+            await conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                await conn.execute(
+                    "INSERT OR IGNORE INTO users (id, google_sub, email, display_name, avatar_url, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (uuid4().hex, google_sub, email, display_name, avatar_url, now_iso),
+                )
+                await conn.execute(
+                    "UPDATE users SET email = ?, display_name = ?, avatar_url = ? WHERE google_sub = ?",
+                    (email, display_name, avatar_url, google_sub),
+                )
+            except BaseException:
+                await conn.execute("ROLLBACK")
+                raise
+            await conn.execute("COMMIT")
+        conn = await self._ensure_conn()
+        cursor = await conn.execute(
+            "SELECT id, google_sub, email, display_name, avatar_url, created_at FROM users WHERE google_sub = ?",
+            (google_sub,),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        if row is None:
+            raise RuntimeError(f"Failed to upsert user with google_sub={google_sub!r}")
+        return _row_to_user(row)
+
+    async def get_user_by_id(self, user_id: str) -> Optional[User]:
+        conn = await self._ensure_conn()
+        cursor = await conn.execute(
+            "SELECT id, google_sub, email, display_name, avatar_url, created_at FROM users WHERE id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        return _row_to_user(row) if row else None
 
     async def list_tags(self, space_id: str) -> list[Tag]:
         conn = await self._ensure_conn()

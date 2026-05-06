@@ -5,6 +5,10 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       THREADED_DATABASE_PATH: /data/threaded.sqlite3
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET}"
+      JWT_SECRET: "${JWT_SECRET}"
+      APP_BASE_URL: "${APP_BASE_URL}"
     volumes:
       - threaded-data:/data
 

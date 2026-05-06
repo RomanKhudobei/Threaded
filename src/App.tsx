@@ -48,6 +48,18 @@ type View =
   | { kind: "root"; spaceId: string | null }
   | { kind: "thread"; spaceId: string | null; noteId: string };
 
+type AuthUser = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+};
+
+type AuthState =
+  | { status: "loading" }
+  | { status: "unauthenticated" }
+  | { status: "authenticated"; user: AuthUser };
+
 type SidebarMode = "roots" | "siblings";
 type DateRange = { from: string; to: string }; // "YYYY-MM-DD"
 type SpaceModalState =
@@ -98,9 +110,14 @@ function viewKey(view: View): string {
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     ...init,
   });
+  if (res.status === 401) {
+    window.dispatchEvent(new CustomEvent("auth:unauthenticated"));
+    throw new Error("Not signed in");
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -167,6 +184,7 @@ const api = {
   deleteSpace: async (id: string) => {
     const res = await fetch(`${API_BASE}/spaces/${encodeURIComponent(id)}`, {
       method: "DELETE",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) {
@@ -217,8 +235,9 @@ const api = {
     const res = await fetch(
       `${API_BASE}/notes/${encodeURIComponent(id)}?spaceId=${encodeURIComponent(spaceId)}`,
       {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
+        method: "DELETE",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
       },
     );
     if (!res.ok) {
@@ -370,6 +389,13 @@ const Icons = {
       <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
       <path d="M2.5 7h11" />
       <path d="M5.5 2v3M10.5 2v3" />
+    </svg>
+  ),
+  SignOut: () => (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="M6 3H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3" />
+      <path d="m10 11 3-3-3-3" />
+      <path d="M13 8H6" />
     </svg>
   ),
 };
@@ -1801,8 +1827,96 @@ function Breadcrumb({
     </div>
   );
 }
+// ——— welcome (first space) ———
+function WelcomeScreen({
+  onCreated,
+}: {
+  onCreated: (space: Space) => void;
+}): ReactNode {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) { setErr("Space name cannot be empty"); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      const space = await api.createSpace(trimmed);
+      onCreated(space);
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Could not create space");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="app welcome-screen">
+      <main className="welcome-main">
+        <div className="welcome-icon" aria-hidden="true">✦</div>
+        <h1 className="welcome-heading">Let's create your first space</h1>
+        <p className="welcome-sub">
+          A space holds related thoughts. You can add more later.
+        </p>
+        <form className="welcome-form" onSubmit={(e) => void handleSubmit(e)}>
+          <input
+            className="welcome-input"
+            type="text"
+            placeholder="e.g. Work, Personal, Research…"
+            value={name}
+            onChange={(e) => { setName(e.target.value); setErr(null); }}
+            autoFocus
+            disabled={busy}
+            maxLength={120}
+          />
+          {err && <p className="welcome-err">{err}</p>}
+          <button className="btn welcome-btn" type="submit" disabled={busy || !name.trim()}>
+            {busy ? "Creating…" : "Create space"}
+          </button>
+        </form>
+      </main>
+    </div>
+  );
+}
+
+// ——— login ———
+function LoginScreen(): ReactNode {
+  return (
+    <div className="app login-screen">
+      <main className="login-main">
+        <h1 className="login-wordmark">Threaded</h1>
+        <p className="login-tagline">A quiet place to go deep.</p>
+        <a href="/api/auth/google/login" className="btn btn-google">
+          Sign in with Google
+        </a>
+      </main>
+    </div>
+  );
+}
+
 // ——— main ———
 export default function App(): ReactNode {
+  const [auth, setAuth] = useState<AuthState>({ status: "loading" });
+
+  useEffect(() => {
+    http<AuthUser>(`${API_BASE}/auth/me`)
+      .then((user) => setAuth({ status: "authenticated", user }))
+      .catch(() => setAuth({ status: "unauthenticated" }));
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setAuth({ status: "unauthenticated" });
+    window.addEventListener("auth:unauthenticated", handler);
+    return () => window.removeEventListener("auth:unauthenticated", handler);
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    await fetch(`${API_BASE}/auth/logout`, { method: "POST", credentials: "include" });
+    setAuth({ status: "unauthenticated" });
+  }, []);
+
   const [view, setView] = useState<View>(() => {
     if (typeof window === "undefined") return { kind: "root", spaceId: null };
     return viewFromPath(window.location.pathname);
@@ -1849,12 +1963,16 @@ export default function App(): ReactNode {
     window.localStorage.setItem("threaded-theme", dark ? "dark" : "light");
   }, [dark]);
 
+  const [spacesLoaded, setSpacesLoaded] = useState(false);
+
   const refreshSpaces = useCallback(async () => {
     try {
       const data = await api.listSpaces();
       setSpaces(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load spaces");
+    } finally {
+      setSpacesLoaded(true);
     }
   }, []);
 
@@ -2327,13 +2445,38 @@ export default function App(): ReactNode {
   }, []);
 
   const currentThreadId = view.kind === "thread" ? view.noteId : null;
-  if (spaces.length === 0) {
+
+  if (auth.status === "loading") {
+    return (
+      <div className="app">
+        <main className="main">
+          <div className="loading">Loading…</div>
+        </main>
+      </div>
+    );
+  }
+  if (auth.status === "unauthenticated") {
+    return <LoginScreen />;
+  }
+
+  if (!spacesLoaded) {
     return (
       <div className="app">
         <main className="main">
           <div className="loading">Loading spaces…</div>
         </main>
       </div>
+    );
+  }
+
+  if (spaces.length === 0) {
+    return (
+      <WelcomeScreen
+        onCreated={(space) => {
+          setSpaces([space]);
+          navigateToView({ kind: "root", spaceId: space.id });
+        }}
+      />
     );
   }
 
@@ -2404,6 +2547,23 @@ export default function App(): ReactNode {
               aria-label="Toggle theme"
             >
               {dark ? <Icons.Sun /> : <Icons.Moon />}
+            </button>
+            {/* {auth.status === "authenticated" && auth.user.avatarUrl && (
+              <img
+                src={auth.user.avatarUrl}
+                alt={auth.user.displayName ?? auth.user.email}
+                className="topbar-avatar"
+                title={auth.user.displayName ?? auth.user.email}
+              />
+            )} */}
+            <button
+              type="button"
+              className="icon-btn topbar-logout"
+              onClick={() => void handleLogout()}
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <Icons.SignOut />
             </button>
           </div>
         </header>

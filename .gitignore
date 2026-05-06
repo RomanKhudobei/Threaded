@@ -17,3 +17,7 @@ venv
 
 # Backend data
 backend/data/
+
+# Secrets
+.env
+client_secret*
