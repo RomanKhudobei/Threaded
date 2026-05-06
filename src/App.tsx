@@ -401,14 +401,21 @@ const Icons = {
 };
 
 // ——— wordmark / brand ———
+function BrandMark({ width = 18 }: { width?: number }) {
+  const h = Math.round((width / 18) * 12);
+  return (
+    <svg width={width} height={h} viewBox="0 0 18 12" fill="currentColor" aria-hidden="true">
+      <rect x="0"    y="0"  width="18"   height="2" rx="1" opacity="0.9"  />
+      <rect x="5.4"  y="5"  width="12.6" height="2" rx="1" opacity="0.65" />
+      <rect x="10.5" y="10" width="7.5"  height="2" rx="1" opacity="0.4"  />
+    </svg>
+  );
+}
+
 function Wordmark({ size = "lg" }: { size?: "sm" | "lg" }) {
   return (
     <span className={`wordmark wordmark--${size}`}>
-      <span className="brand-mark" aria-hidden="true">
-        <span className="brand-line" />
-        <span className="brand-line" />
-        <span className="brand-line" />
-      </span>
+      <BrandMark width={size === "sm" ? 18 : 26} />
       <span className="wordmark-text">Threaded</span>
     </span>
   );
@@ -1881,17 +1888,232 @@ function WelcomeScreen({
   );
 }
 
-// ——— login ———
+// ——— landing / login ———
+const LANDING_FEATURES = [
+  {
+    key: "threading",
+    title: "Threading",
+    desc: "Branch any thought into a full conversation with yourself. Ideas connect and grow deeper without ever losing context.",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="3" y1="4" x2="11" y2="4" />
+        <line x1="5" y1="9" x2="13" y2="9" />
+        <line x1="7" y1="14" x2="15" y2="14" />
+        <circle cx="14" cy="4" r="2" />
+        <circle cx="16" cy="9" r="2" />
+        <circle cx="18" cy="14" r="2" />
+      </svg>
+    ),
+  },
+  {
+    key: "tags",
+    title: "Tags",
+    desc: "Label thoughts effortlessly and filter your feed in one click. The right idea is always one tag away.",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 3h6l8 8-6 6-8-8V3z" />
+        <circle cx="7" cy="7" r="1.2" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+  },
+  {
+    key: "search",
+    title: "Search & Filter",
+    desc: "Find any thought in seconds. Search by text, filter by date range or tags — nothing stays buried.",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="8.5" cy="8.5" r="5" />
+        <line x1="12.5" y1="12.5" x2="17" y2="17" />
+        <line x1="6" y1="8.5" x2="11" y2="8.5" />
+        <line x1="6" y1="6" x2="9" y2="6" />
+        <line x1="6" y1="11" x2="10" y2="11" />
+      </svg>
+    ),
+  },
+  {
+    key: "spaces",
+    title: "Spaces",
+    desc: "Separate contexts for work, side projects, or personal life. Each space is its own focused world.",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="2" width="7" height="7" rx="1.5" />
+        <rect x="11" y="2" width="7" height="7" rx="1.5" />
+        <rect x="2" y="11" width="7" height="7" rx="1.5" />
+        <rect x="11" y="11" width="7" height="7" rx="1.5" />
+      </svg>
+    ),
+  },
+  {
+    key: "theme",
+    title: "Light & Dark Mode",
+    desc: "A theme that matches your environment and mood — crisp in daylight, restful at night.",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10 2v2M10 16v2M4.22 4.22l1.42 1.42M14.36 14.36l1.42 1.42M2 10h2M16 10h2M4.22 15.78l1.42-1.42M14.36 5.64l1.42-1.42" />
+        <circle cx="10" cy="10" r="3.5" />
+      </svg>
+    ),
+  },
+];
+
 function LoginScreen(): ReactNode {
   return (
-    <div className="app login-screen">
-      <main className="login-main">
-        <h1 className="login-wordmark">Threaded</h1>
-        <p className="login-tagline">A quiet place to go deep.</p>
-        <a href="/api/auth/google/login" className="btn btn-google">
-          Sign in with Google
+    <div className="landing">
+      {/* ——— nav ——— */}
+      <nav className="landing-nav">
+        <div className="wordmark">
+          <BrandMark width={18} />
+          <span className="wordmark-text">Threaded</span>
+        </div>
+        <a href="/api/auth/google/login" className="btn btn-primary landing-nav-signin">
+          Sign in
         </a>
-      </main>
+      </nav>
+
+      {/* ——— hero ——— */}
+      <section className="landing-hero">
+        <BrandMark width={64} />
+        <h1 className="landing-headline">
+          Every idea deserves<br className="landing-br" /> a place to grow.
+        </h1>
+        <p className="landing-sub">
+          Threaded is your personal thinking space — capture thoughts as they come,
+          build on them over time, and never lose the thread of what matters to you.
+        </p>
+        <div className="landing-hero-actions">
+          <a href="/api/auth/google/login" className="landing-cta">
+            Start writing
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <line x1="3" y1="8" x2="13" y2="8" />
+              <polyline points="9,4 13,8 9,12" />
+            </svg>
+          </a>
+          <a href="/api/auth/google/login" className="btn-google landing-google-btn">
+            <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden>
+              <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" />
+              <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853" />
+              <path d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z" fill="#FBBC05" />
+              <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z" fill="#EA4335" />
+            </svg>
+            Continue with Google
+          </a>
+        </div>
+      </section>
+
+      {/* ——— mock app preview ——— */}
+      <div className="landing-preview-wrap" aria-hidden>
+        <div className="landing-preview">
+          <div className="lp-sidebar">
+            <div className="lp-brand">
+              <BrandMark width={18} />
+              <span className="lp-brand-name">Threaded</span>
+            </div>
+            <div className="lp-sidebar-items">
+              <div className="lp-thread-item lp-thread-item--active">
+                <div className="lp-thread-bar" />
+                <div className="lp-thread-lines">
+                  <span className="lp-line lp-line--full" />
+                  <span className="lp-line lp-line--half" />
+                </div>
+                <div className="lp-thread-meta">
+                  <span className="lp-tag">#design</span>
+                  <span className="lp-ts">Today</span>
+                </div>
+              </div>
+              <div className="lp-thread-item">
+                <div className="lp-thread-lines">
+                  <span className="lp-line lp-line--three-quarters" />
+                  <span className="lp-line lp-line--third" />
+                </div>
+                <div className="lp-thread-meta">
+                  <span className="lp-tag">#ideas</span>
+                  <span className="lp-ts">Yesterday</span>
+                </div>
+              </div>
+              <div className="lp-thread-item">
+                <div className="lp-thread-lines">
+                  <span className="lp-line lp-line--half" />
+                  <span className="lp-line lp-line--quarter" />
+                </div>
+                <div className="lp-thread-meta">
+                  <span className="lp-tag">#work</span>
+                  <span className="lp-ts">Mon</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="lp-main">
+            <div className="lp-card lp-card--root">
+              <div className="lp-card-lines">
+                <span className="lp-line lp-line--full" />
+                <span className="lp-line lp-line--three-quarters" />
+                <span className="lp-line lp-line--half" />
+              </div>
+              <div className="lp-card-tags">
+                <span className="lp-tag">#design</span>
+                <span className="lp-tag">#landing</span>
+              </div>
+            </div>
+            <div className="lp-thread-branch">
+              <div className="lp-card lp-card--child">
+                <div className="lp-card-lines">
+                  <span className="lp-line lp-line--three-quarters" />
+                  <span className="lp-line lp-line--half" />
+                </div>
+                <div className="lp-card-tags">
+                  <span className="lp-tag">#ui</span>
+                </div>
+              </div>
+              <div className="lp-thread-branch lp-thread-branch--nested">
+                <div className="lp-card lp-card--child">
+                  <div className="lp-card-lines">
+                    <span className="lp-line lp-line--half" />
+                    <span className="lp-line lp-line--quarter" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ——— features ——— */}
+      <section className="landing-features">
+        <p className="landing-section-eyebrow">Built for depth</p>
+        <h2 className="landing-section-title">Everything your ideas need</h2>
+        <div className="landing-features-grid">
+          {LANDING_FEATURES.map((f) => (
+            <div key={f.key} className="landing-feature-card">
+              <div className="landing-feature-icon">{f.icon}</div>
+              <h3 className="landing-feature-title">{f.title}</h3>
+              <p className="landing-feature-desc">{f.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ——— bottom cta ——— */}
+      <section className="landing-bottom-cta">
+        <BrandMark width={42} />
+        <h2 className="landing-bottom-title">Start capturing what matters.</h2>
+        <p className="landing-bottom-sub">Your best ideas are waiting to be written down.</p>
+        <a href="/api/auth/google/login" className="landing-cta">
+          Get started — it's free
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <line x1="3" y1="8" x2="13" y2="8" />
+            <polyline points="9,4 13,8 9,12" />
+          </svg>
+        </a>
+      </section>
+
+      {/* ——— footer ——— */}
+      <footer className="landing-footer">
+        <div className="wordmark">
+          <BrandMark width={18} />
+          <span className="wordmark-text">Threaded</span>
+        </div>
+        <p className="landing-footer-copy">A quiet place to go deep.</p>
+      </footer>
     </div>
   );
 }
