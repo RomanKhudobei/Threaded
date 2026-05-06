@@ -398,6 +398,11 @@ const Icons = {
       <path d="M13 8H6" />
     </svg>
   ),
+  Heart: () => (
+    <svg {...iconProps} aria-hidden="true">
+      <path d="M8 13s-5.5-3.5-5.5-7A3.5 3.5 0 0 1 8 4.5 3.5 3.5 0 0 1 13.5 6c0 3.5-5.5 7-5.5 7z" />
+    </svg>
+  ),
 };
 
 // ——— wordmark / brand ———
@@ -2761,6 +2766,16 @@ export default function App(): ReactNode {
             onOpenThread={handleOpenThread}
           />
           <div className="topbar-right">
+            <a
+              href="https://base.monobank.ua/86mwun6dMDyLMj"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="icon-btn"
+              title="Donate"
+              aria-label="Donate"
+            >
+              <Icons.Heart />
+            </a>
             <button
               type="button"
               className="icon-btn"
