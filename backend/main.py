@@ -306,7 +306,7 @@ async def google_callback(
         key=COOKIE_NAME,
         value=jwt_token,
         httponly=True,
-        samesite="lax",
+        samesite="none",
         secure=_is_secure(request),
         max_age=auth_module.JWT_MAX_AGE,
         path="/",
