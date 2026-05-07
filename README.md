@@ -144,7 +144,7 @@ if data ever gets corrupted into a cycle.
 - [x] Add sort/filter on main canvas (somewhere near composer). It should stay on each thread. Add
 list of popular tags with counts
 - [x] Add grouping by date for better visibility and structure
-- [ ] Add auth with Google/Apple
+- [x] Add auth with Google/Apple
 - [x] Deploy
 - [ ] Add colors?
 - [x] Implement tree-like navigation for thoughts (or in sidebar display adjacent cards, instead of roots)

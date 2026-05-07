@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://threaded-crol.onrender.com/api/:path*"
+    }
+  ]
+}
