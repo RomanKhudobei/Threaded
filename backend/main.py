@@ -11,8 +11,11 @@ Endpoints:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 import sqlite3
 from pathlib import Path
 from typing import Optional
