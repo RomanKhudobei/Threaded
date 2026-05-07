@@ -1970,7 +1970,7 @@ function LoginScreen(): ReactNode {
           <BrandMark width={18} />
           <span className="wordmark-text">Threaded</span>
         </div>
-        <a href={`${API_BASE}/auth/google/login`} className="btn btn-primary landing-nav-signin">
+        <a href="/api/auth/google/login" className="btn btn-primary landing-nav-signin">
           Sign in
         </a>
       </nav>
@@ -1986,14 +1986,14 @@ function LoginScreen(): ReactNode {
           build on them over time, and never lose the thread of what matters to you.
         </p>
         <div className="landing-hero-actions">
-          <a href={`${API_BASE}/auth/google/login`} className="landing-cta">
+          <a href="/api/auth/google/login" className="landing-cta">
             Start writing
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <line x1="3" y1="8" x2="13" y2="8" />
               <polyline points="9,4 13,8 9,12" />
             </svg>
           </a>
-          <a href={`${API_BASE}/auth/google/login`} className="btn-google landing-google-btn">
+          <a href="/api/auth/google/login" className="btn-google landing-google-btn">
             <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden>
               <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" />
               <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853" />
@@ -2102,7 +2102,7 @@ function LoginScreen(): ReactNode {
         <BrandMark width={42} />
         <h2 className="landing-bottom-title">Start capturing what matters.</h2>
         <p className="landing-bottom-sub">Your best ideas are waiting to be written down.</p>
-        <a href={`${API_BASE}/auth/google/login`} className="landing-cta">
+        <a href="/api/auth/google/login" className="landing-cta">
           Get started — it's free
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <line x1="3" y1="8" x2="13" y2="8" />

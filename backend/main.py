@@ -47,7 +47,7 @@ APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8080").rstrip("/
 BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_REDIRECT_URI = f"{BACKEND_BASE_URL}/api/auth/google/callback"
+GOOGLE_REDIRECT_URI = f"{APP_BASE_URL}/api/auth/google/callback"
 GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
@@ -301,7 +301,7 @@ async def google_callback(
     )
 
     jwt_token = create_jwt(user.id)
-    redirect = RedirectResponse(url=APP_BASE_URL, status_code=302)
+    redirect = RedirectResponse(url="/", status_code=302)
     redirect.delete_cookie(OAUTH_STATE_COOKIE, path="/")
     redirect.set_cookie(
         key=COOKIE_NAME,
