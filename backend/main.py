@@ -301,7 +301,7 @@ async def google_callback(
     )
 
     jwt_token = create_jwt(user.id)
-    redirect = RedirectResponse(url="/", status_code=302)
+    redirect = RedirectResponse(url=APP_BASE_URL, status_code=302)
     redirect.delete_cookie(OAUTH_STATE_COOKIE, path="/")
     redirect.set_cookie(
         key=COOKIE_NAME,
